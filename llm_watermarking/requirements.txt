@@ -1,0 +1,16 @@
+# Core deep-learning / HuggingFace stack
+torch>=2.1.0
+transformers>=4.39.0
+accelerate>=0.28.0
+bitsandbytes>=0.46.1
+
+# Data & numerics
+numpy>=1.26.0
+pandas==2.2.2  # Colab requires this exact version
+
+# Visualisation
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Optional — only needed if you use the evaluate library metrics
+# evaluate>=0.4.0
