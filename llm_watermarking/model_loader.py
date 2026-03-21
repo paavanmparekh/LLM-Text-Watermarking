@@ -41,21 +41,26 @@ def load_model_and_tokenizer(cfg: Config = None):
     }
     compute_dtype = dtype_map.get(cfg.bnb_4bit_compute_dtype, torch.bfloat16)
 
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=cfg.load_in_4bit,
-        bnb_4bit_use_double_quant=cfg.bnb_4bit_use_double_quant,
-        bnb_4bit_quant_type=cfg.bnb_4bit_quant_type,
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
+    bnb_config = None
+    if cfg.load_in_4bit:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=cfg.load_in_4bit,
+            bnb_4bit_use_double_quant=cfg.bnb_4bit_use_double_quant,
+            bnb_4bit_quant_type=cfg.bnb_4bit_quant_type,
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
 
     print(f"Loading {cfg.model_name} ...")
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     tokenizer.pad_token = tokenizer.eos_token   # required for batch padding
 
+    model_kwargs = {"device_map": cfg.device_map}
+    if bnb_config:
+        model_kwargs["quantization_config"] = bnb_config
+
     model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name,
-        quantization_config=bnb_config,
-        device_map=cfg.device_map,
+        **model_kwargs
     )
     model.eval()
     print("Model loaded successfully!")

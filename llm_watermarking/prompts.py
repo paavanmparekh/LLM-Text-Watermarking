@@ -21,11 +21,11 @@ from typing import List, Optional
 
 
 DEFAULT_PROMPTS: List[str] = [
-    "[INST] Explain the concept of zero-knowledge proofs. [/INST]",
-    "[INST] Write a short summary about the history of the Roman Empire. [/INST]",
-    "[INST] What are the main differences between classical computing and quantum computing? [/INST]",
-    "[INST] Describe a futuristic city in the year 2050 using vivid imagery. [/INST]",
-    "[INST] Provide a step-by-step guide to baking a chocolate cake. [/INST]",
+    "Instruct: Explain the concept of zero-knowledge proofs.\nOutput:",
+    "Instruct: Write a short summary about the history of the Roman Empire.\nOutput:",
+    "Instruct: What are the main differences between classical computing and quantum computing?\nOutput:",
+    "Instruct: Describe a futuristic city in the year 2050 using vivid imagery.\nOutput:",
+    "Instruct: Provide a step-by-step guide to baking a chocolate cake.\nOutput:",
 ]
 
 

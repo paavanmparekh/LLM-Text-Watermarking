@@ -14,10 +14,10 @@ class Config:
     # ------------------------------------------------------------------ #
     #  Model                                                               #
     # ------------------------------------------------------------------ #
-    model_name: str = "mistralai/Mistral-7B-Instruct-v0.2"
+    model_name: str = "microsoft/phi-2"
     """HuggingFace model ID."""
 
-    load_in_4bit: bool = True
+    load_in_4bit: bool = False
     """Enable 4-bit QLoRA quantization via BitsAndBytes."""
 
     bnb_4bit_use_double_quant: bool = True

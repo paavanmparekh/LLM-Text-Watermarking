@@ -198,5 +198,7 @@ def plot_evaluation_metrics(
     output_dir : str, optional
         Directory to save plots. Displays interactively if None.
     """
+    plot_entropy_trajectories(results, output_dir)
     plot_entropy_distributions(results, output_dir)
+    plot_entropy_aggregate(results, output_dir)
     plot_heatmap(results, output_dir)
