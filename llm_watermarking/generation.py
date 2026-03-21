@@ -27,7 +27,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-from transformers import LogitsProcessor, LogitsProcessorList
+from transformers import LogitsProcessor, LogitsProcessorList, TemperatureLogitsWarper, TopPLogitsWarper
 
 from .config import Config, config as default_config
 
@@ -50,7 +50,12 @@ class BaselineLogitTracker(LogitsProcessor):
     computed at step i+1 (when input_ids already contains x_i).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, temperature: float = 1.0, top_p: float = 1.0) -> None:
+        self.warpers = LogitsProcessorList()
+        if temperature is not None and temperature != 1.0:
+            self.warpers.append(TemperatureLogitsWarper(temperature))
+        if top_p is not None and top_p < 1.0:
+            self.warpers.append(TopPLogitsWarper(top_p))
         self.reset()
 
     def reset(self) -> None:
@@ -79,9 +84,13 @@ class BaselineLogitTracker(LogitsProcessor):
             self.total_empirical += surprisal
             self.cumulative_empirical.append(self.total_empirical)
 
+        # Apply temperature and top_p to a CLONE of the scores
+        warped_scores = self.warpers(input_ids, scores.clone())
+
         # --- 2. Shannon entropy of the CURRENT distribution ------------ #
-        probs = torch.nn.functional.softmax(scores, dim=-1)
-        log_probs_b2 = torch.nn.functional.log_softmax(scores, dim=-1) / math.log(2)
+        probs = torch.nn.functional.softmax(warped_scores, dim=-1)
+        # Use log2 and clamp to handle zeros from top_p
+        log_probs_b2 = torch.log2(torch.clamp(probs, min=1e-10))
         shannon_h = -(probs * log_probs_b2).sum(dim=-1)
         self.shannon_entropies.append(shannon_h.item())
 
@@ -91,7 +100,7 @@ class BaselineLogitTracker(LogitsProcessor):
             [(int(tid), float(p)) for tid, p in zip(top_ids, top_probs)]
         )
 
-        # Save for next step
+        # Save for next step (using warped log probs)
         self._last_log_probs = log_probs_b2.detach()
 
         return scores  # pass through — we never modify logits here
@@ -162,7 +171,10 @@ class LLMGenerator:
 
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
 
-        tracker = BaselineLogitTracker()
+        tracker = BaselineLogitTracker(
+            temperature=temperature if temperature is not None else 1.0,
+            top_p=top_p if top_p is not None else 1.0
+        )
         processors = LogitsProcessorList([tracker])
         if custom_processor:
             processors.append(custom_processor)
