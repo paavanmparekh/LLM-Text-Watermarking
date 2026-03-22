@@ -9,6 +9,7 @@ Usage
 
 import torch
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
@@ -54,15 +55,16 @@ def load_model_and_tokenizer(cfg: Config = None):
     tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
     tokenizer.pad_token = tokenizer.eos_token   # required for batch padding
 
-    model_kwargs = {
-        "device_map": cfg.device_map,
-        "pad_token_id": tokenizer.pad_token_id,
-    }
+    model_kwargs = {"device_map": cfg.device_map}
     if bnb_config:
         model_kwargs["quantization_config"] = bnb_config
 
+    config = AutoConfig.from_pretrained(cfg.model_name)
+    config.pad_token_id = tokenizer.pad_token_id
+
     model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name,
+        config=config,
         **model_kwargs
     )
     model.eval()
