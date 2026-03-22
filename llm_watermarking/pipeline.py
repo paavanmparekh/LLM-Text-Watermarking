@@ -34,6 +34,7 @@ def run_pipeline(
     cfg: Config = None,
     prompt_loader: Optional[PromptLoader] = None,
     custom_processor=None,
+    watermark_scheme=None,
 ) -> Tuple[List[dict], pd.DataFrame]:
     """
     Run the full baseline generation + evaluation pipeline.
@@ -66,9 +67,19 @@ def run_pipeline(
     results: List[dict] = []
     prompts = prompt_loader.get_prompts()
 
+    use_binary = watermark_scheme is not None
+    mode_label = watermark_scheme.NAME if use_binary else "baseline"
+
     for i, prompt in enumerate(prompts):
-        print(f"\n[{i+1}/{len(prompts)}] Generating for prompt: {prompt[:60]}...")
-        gen_data  = generator.generate_text(prompt, custom_processor=custom_processor)
+        print(f"\n[{i+1}/{len(prompts)}] [{mode_label}] Generating for prompt: {prompt[:60]}...")
+        if use_binary:
+            gen_data = watermark_scheme.generate(
+                model, tokenizer, prompt,
+                max_new_tokens=cfg.max_new_tokens if cfg else None,
+            )
+        else:
+            gen_data = generator.generate_text(prompt, custom_processor=custom_processor)
+        gen_data["mode"] = mode_label
         eval_data = evaluator.evaluate(gen_data)
         results.append(eval_data)
         print(f"  Done in {gen_data['generation_time']}s | {gen_data['num_tokens']} tokens")

@@ -21,9 +21,9 @@ from typing import List, Optional
 
 
 DEFAULT_PROMPTS: List[str] = [
-    "Instruct: Explain the concept of zero-knowledge proofs.\nOutput:",
-    "Instruct: Write a short summary about the history of the Roman Empire.\nOutput:",
-    "Instruct: What are the main differences between classical computing and quantum computing?\nOutput:",
+    # "Instruct: Explain the concept of zero-knowledge proofs.\nOutput:",
+    # "Instruct: Write a short summary about the history of the Roman Empire.\nOutput:",
+    # "Instruct: What are the main differences between classical computing and quantum computing?\nOutput:",
     "Instruct: Describe a futuristic city in the year 2050 using vivid imagery.\nOutput:",
     "Instruct: Provide a step-by-step guide to baking a chocolate cake.\nOutput:",
 ]

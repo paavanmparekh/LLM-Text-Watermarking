@@ -22,6 +22,8 @@ from .generation import BaselineLogitTracker, LLMGenerator
 from .evaluation import Evaluator
 from .visualization import plot_evaluation_metrics
 from .pipeline import run_pipeline
+from .binarizer import build_binary_vocab, compute_bit_probs
+from .watermarks import WATERMARK_REGISTRY
 
 __all__ = [
     "Config",
@@ -32,4 +34,7 @@ __all__ = [
     "Evaluator",
     "plot_evaluation_metrics",
     "run_pipeline",
+    "build_binary_vocab",
+    "compute_bit_probs",
+    "WATERMARK_REGISTRY",
 ]

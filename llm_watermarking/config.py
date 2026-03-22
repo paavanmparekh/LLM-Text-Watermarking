@@ -7,6 +7,7 @@ magic numbers are scattered across other modules.
 
 from dataclasses import dataclass, field
 import os
+from typing import Optional
 
 
 @dataclass
@@ -41,8 +42,16 @@ class Config:
     output_dir: str = "outputs"
     """Directory where results and plots are saved."""
 
-    results_file: str = "baseline_results.jsonl"
-    """JSONL file for raw generation + evaluation results."""
+    watermark: Optional[str] = None
+    """Active watermarking scheme name (e.g. 'Undetectable', 'PRC').
+    None means standard baseline generation (no watermark)."""
+
+    @property
+    def results_file(self) -> str:
+        """JSONL filename derived from the active watermarking scheme."""
+        if self.watermark:
+            return f"{self.watermark.lower()}_results.jsonl"
+        return "baseline_results.jsonl"
 
     @property
     def results_path(self) -> str:

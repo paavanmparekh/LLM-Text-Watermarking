@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Output directories
+outputs/
+*.jsonl
+*.png
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/

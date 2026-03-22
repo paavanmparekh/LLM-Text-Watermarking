@@ -21,6 +21,7 @@ from .model_loader import load_model_and_tokenizer
 from .pipeline import load_results, run_pipeline
 from .prompts import PromptLoader
 from .visualization import plot_evaluation_metrics
+from .watermarks import WATERMARK_REGISTRY
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,6 +65,14 @@ def parse_args() -> argparse.Namespace:
         metavar="JSONL_PATH",
         help="Skip generation; load saved JSONL results and re-plot.",
     )
+    parser.add_argument(
+        "--watermark",
+        type=str,
+        default=None,
+        choices=list(WATERMARK_REGISTRY.keys()),
+        help="Watermarking scheme to use (e.g. 'Undetectable'). "
+             "Omit for standard baseline generation.",
+    )
     return parser.parse_args()
 
 
@@ -74,6 +83,7 @@ def main() -> None:
         max_new_tokens=args.max_tokens,
         temperature=args.temperature,
         output_dir=args.output_dir,
+        watermark=args.watermark,
     )
 
     # ------------------------------------------------------------------ #
@@ -87,6 +97,17 @@ def main() -> None:
         return
 
     # ------------------------------------------------------------------ #
+    #  Resolve watermarking scheme (if any)                               #
+    # ------------------------------------------------------------------ #
+    watermark_scheme = None
+    if args.watermark:
+        scheme_cls = WATERMARK_REGISTRY[args.watermark]
+        watermark_scheme = scheme_cls(cfg)
+        print(f"Watermarking scheme: {args.watermark} → {watermark_scheme.NAME}")
+    else:
+        print("Mode: baseline (no watermark)")
+
+    # ------------------------------------------------------------------ #
     #  Full run                                                            #
     # ------------------------------------------------------------------ #
     model, tokenizer = load_model_and_tokenizer(cfg)
@@ -96,7 +117,12 @@ def main() -> None:
     )
     print(f"Using {len(prompt_loader)} prompt(s).")
 
-    results, df = run_pipeline(model, tokenizer, cfg=cfg, prompt_loader=prompt_loader)
+    results, df = run_pipeline(
+        model, tokenizer,
+        cfg=cfg,
+        prompt_loader=prompt_loader,
+        watermark_scheme=watermark_scheme,
+    )
 
     print("\n=== Summary ===")
     print(df.to_string(index=False))
