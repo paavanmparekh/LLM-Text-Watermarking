@@ -44,7 +44,7 @@ from ...config import Config, config as default_config
 #  PRF                                                                #
 # ------------------------------------------------------------------ #
 
-def _prf(key: bytes, r: Tuple[int, ...], global_bit_pos: int) -> float:
+def _prf(key: bytes, r: Tuple, global_bit_pos: int) -> float:
     """
     Keyed PRF: (key, r, bit_pos) → float in [0, 1].
 
@@ -112,7 +112,8 @@ class UndetectableWatermark:
             key_hex        : hex-encoded secret key
             lambda_entropy : λ value used
             phase1_tokens  : number of tokens in burn-in phase
-            bit_trace      : list of per-bit dicts (Phase 2 only) for detection
+            all_tokens     : generated token strings (for detector anchor search)
+            generated_ids  : generated token IDs (for detector bit extraction)
         """
         max_new_tokens = max_new_tokens or self.cfg.max_new_tokens
 
@@ -127,9 +128,8 @@ class UndetectableWatermark:
         past: Any = None
 
         # ---- state ----------------------------------------------------- #
-        H: float = 0.0               # accumulated empirical entropy (bits)
-        r: Optional[Tuple] = None    # PRF seed, frozen once H ≥ λ
-        global_bit_pos: int = 0      # monotone counter over Phase-2 bit decisions
+        H: float = 0.0
+        r: Optional[Tuple] = None
 
         # ---- metric accumulators --------------------------------------- #
         shannon_entropies: List[float] = []
@@ -137,7 +137,6 @@ class UndetectableWatermark:
         cumulative_empirical: List[float] = []
         total_empirical: float = 0.0
         generated_ids: List[int] = []
-        bit_trace: List[Dict] = []   # Phase-2 records for detection
         phase1_count: int = 0
 
         t0 = time.time()
@@ -187,28 +186,16 @@ class UndetectableWatermark:
                 token_id <<= 1
 
                 if in_phase1:
-                    # ── Phase 1: sample normally ──────────────────────── #
                     chosen = 1 if torch.rand(1).item() < prob_1 else 0
                     token_id += chosen
                     chosen_prob = prob_1 if chosen == 1 else prob_0
                     token_log_prob += math.log2(chosen_prob) if chosen_prob > 0.0 else -1000.0
                 else:
-                    # ── Phase 2: watermark via PRF threshold ──────────── #
-                    prf_val = _prf(self.key, r, global_bit_pos)
+                    prf_val = _prf(self.key, r, step * bit_length + bit_idx)
                     chosen = 1 if prf_val <= prob_1 else 0
                     token_id += chosen
                     chosen_prob = prob_1 if chosen == 1 else prob_0
                     token_log_prob += math.log2(chosen_prob) if chosen_prob > 0.0 else -1000.0
-
-                    # Record for detection
-                    bit_trace.append({
-                        "r":          r,
-                        "bit_pos":    global_bit_pos,
-                        "x":          chosen,
-                        "prf_val":    prf_val,
-                        "p1_norm":    prob_1,
-                    })
-                    global_bit_pos += 1
 
             # ---- clamp token_id ---------------------------------------- #
             token_id = min(max(token_id, 0), vocab_size - 1)
@@ -224,9 +211,9 @@ class UndetectableWatermark:
             # ---- Phase 1 → Phase 2 transition check -------------------- #
             if in_phase1:
                 phase1_count += 1
-                H += surprisal  # empirical entropy in bits
+                H += surprisal
                 if H >= self.lambda_entropy and r is None:
-                    r = tuple(generated_ids)  # freeze PRF seed
+                    r = tuple(tokenizer.convert_ids_to_tokens(generated_ids))
                     print(f"  [Undetectable] Phase 1→2 at token {step+1}, H={H:.2f} bits")
 
             # ---- feed token back --------------------------------------- #
@@ -258,5 +245,8 @@ class UndetectableWatermark:
             "key_hex":                      self.key.hex(),
             "lambda_entropy":               self.lambda_entropy,
             "phase1_tokens":                phase1_count,
-            "bit_trace":                    bit_trace,
+            # all_tokens and generated_ids let the detector reconstruct
+            # bit decisions without any stored trace or model re-run.
+            "all_tokens":                   list(tokenizer.convert_ids_to_tokens(generated_ids)),
+            "generated_ids":                generated_ids,
         }

@@ -178,9 +178,5 @@ def load_results(path: str) -> List[dict]:
         for line in fh:
             res = json.loads(line)
             # Reconstruct tuples since JSON turns them into lists
-            if "bit_trace" in res:
-                for trace in res["bit_trace"]:
-                    if "r" in trace and isinstance(trace["r"], list):
-                        trace["r"] = tuple(trace["r"])
             results.append(res)
     return results
