@@ -37,7 +37,7 @@ class Config:
     do_sample: bool = True
 
     # ------------------------------------------------------------------ #
-    #  Paths                                                               #
+    #  Paths & Watermark Params                                            #
     # ------------------------------------------------------------------ #
     output_dir: str = "outputs"
     """Directory where results and plots are saved."""
@@ -45,6 +45,12 @@ class Config:
     watermark: Optional[str] = None
     """Active watermarking scheme name (e.g. 'Undetectable', 'PRC').
     None means standard baseline generation (no watermark)."""
+    
+    watermark_key: Optional[str] = None
+    """Hex-encoded string of the secret key. If None, random key is used."""
+    
+    lambda_entropy: float = 10.0
+    """Security parameter λ for Undetectable watermarking (bits)."""
 
     @property
     def results_file(self) -> str:

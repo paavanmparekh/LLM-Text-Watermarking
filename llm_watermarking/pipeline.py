@@ -2,9 +2,9 @@
 pipeline.py — End-to-end orchestrator for the LLM Watermarking baseline.
 
 run_pipeline()
-    Iterates over prompts, calls LLMGenerator, evaluates each result,
-    persists to disk, and returns both a raw-results list and a summary
-    pandas DataFrame.
+    Iterates over prompts, calls LLMGenerator (or the active watermark scheme),
+    evaluates each result, runs watermark detection if applicable, persists
+    to disk, and returns both a raw-results list and a summary pandas DataFrame.
 
 Usage
 -----
@@ -26,6 +26,7 @@ from .config import Config, config as default_config
 from .evaluation import Evaluator
 from .generation import LLMGenerator
 from .prompts import PromptLoader
+from .watermarks.undetectable import WatermarkDetector
 
 
 def run_pipeline(
@@ -37,7 +38,7 @@ def run_pipeline(
     watermark_scheme=None,
 ) -> Tuple[List[dict], pd.DataFrame]:
     """
-    Run the full baseline generation + evaluation pipeline.
+    Run the full generation + evaluation + detection pipeline.
 
     Parameters
     ----------
@@ -45,16 +46,13 @@ def run_pipeline(
     tokenizer : PreTrainedTokenizer
     cfg : Config, optional
     prompt_loader : PromptLoader, optional
-        Custom prompt set. Falls back to default prompts.
     custom_processor : LogitsProcessor, optional
-        Hook for watermarking logits processors.
+    watermark_scheme : Any, optional
 
     Returns
     -------
     results : list of dict
-        One entry per prompt, each containing generation data + eval.
     df : pd.DataFrame
-        Human-readable summary table.
     """
     if cfg is None:
         cfg = default_config
@@ -63,6 +61,13 @@ def run_pipeline(
 
     generator = LLMGenerator(model, tokenizer, cfg)
     evaluator = Evaluator(model, tokenizer)
+    
+    detector = None
+    if watermark_scheme is not None and hasattr(watermark_scheme, "key"):
+        detector = WatermarkDetector(
+            key=watermark_scheme.key,
+            lambda_entropy=watermark_scheme.lambda_entropy
+        )
 
     results: List[dict] = []
     prompts = prompt_loader.get_prompts()
@@ -79,8 +84,14 @@ def run_pipeline(
             )
         else:
             gen_data = generator.generate_text(prompt, custom_processor=custom_processor)
+            
         gen_data["mode"] = mode_label
         eval_data = evaluator.evaluate(gen_data)
+        
+        if detector and "bit_trace" in eval_data:
+            det = detector.detect(eval_data)
+            print(f"  [Detect] detection_score={det['detection_score']:.2f} | detected={det['detected']}")
+            
         results.append(eval_data)
         print(f"  Done in {gen_data['generation_time']}s | {gen_data['num_tokens']} tokens")
 
@@ -109,6 +120,8 @@ def _save_results(results: List[dict], path: str) -> None:
             return [_make_serialisable(x) for x in obj]
         if hasattr(obj, "item"):          # numpy / torch scalar
             return obj.item()
+        if isinstance(obj, tuple):
+            return list(obj)
         return obj
 
     with open(path, "w", encoding="utf-8") as fh:
@@ -122,17 +135,28 @@ def _build_summary_df(results: List[dict]) -> pd.DataFrame:
     rows = []
     for i, r in enumerate(results):
         ev = r.get("eval", {})
-        rows.append({
+        det = r.get("detection", {})
+        
+        row = {
             "Prompt #":              i + 1,
-            "Prompt Preview":       r["prompt"].replace("[INST]", "").replace("[/INST]", "").strip()[:45] + "…",
-            "Tokens":               r["num_tokens"],
-            "Gen Time (s)":         r.get("generation_time", float("nan")),
-            "Perplexity":           round(ev.get("perplexity", float("nan")), 2),
-            "Dist-1":               round(ev.get("distinct_1", 0.0), 3),
-            "Dist-2":               round(ev.get("distinct_2", 0.0), 3),
-            "Avg Shannon (bits)":   round(ev.get("avg_shannon_entropy", 0.0), 3),
-            "Avg Empirical (bits)": round(ev.get("avg_empirical_entropy", 0.0), 3),
-        })
+            "Prompt Preview":        r["prompt"].replace("[INST]", "").replace("[/INST]", "").strip()[:45] + "…",
+            "Tokens":                r["num_tokens"],
+            "Gen Time (s)":          r.get("generation_time", float("nan")),
+            "Perplexity":            round(ev.get("perplexity", float("nan")), 2),
+            "Dist-1":                round(ev.get("distinct_1", 0.0), 3),
+            "Dist-2":                round(ev.get("distinct_2", 0.0), 3),
+            "Avg Shannon (bits)":    round(ev.get("avg_shannon_entropy", 0.0), 3),
+            "Avg Empirical (bits)":  round(ev.get("avg_empirical_entropy", 0.0), 3),
+        }
+        
+        if det:
+            row["Phase-1"] = r.get("phase1_tokens", 0)
+            row["Phase-2"] = det.get("num_bits", 0)
+            row["Detection Score"] = round(det.get("detection_score", 0.0), 2)
+            row["Watermarked"] = "Yes" if det.get("detected") else "No"
+            
+        rows.append(row)
+        
     return pd.DataFrame(rows)
 
 
@@ -152,5 +176,11 @@ def load_results(path: str) -> List[dict]:
     results = []
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
-            results.append(json.loads(line))
+            res = json.loads(line)
+            # Reconstruct tuples since JSON turns them into lists
+            if "bit_trace" in res:
+                for trace in res["bit_trace"]:
+                    if "r" in trace and isinstance(trace["r"], list):
+                        trace["r"] = tuple(trace["r"])
+            results.append(res)
     return results

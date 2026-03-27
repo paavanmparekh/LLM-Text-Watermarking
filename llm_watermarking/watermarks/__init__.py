@@ -14,7 +14,7 @@ Usage
     result  = scheme.generate(model, tokenizer, prompt)
 """
 
-from .undetectable import UndetectableWatermark
+from .undetectable.generation import UndetectableWatermark
 
 WATERMARK_REGISTRY: dict = {
     "Undetectable": UndetectableWatermark,
