@@ -1,67 +1,3 @@
-"""
-detection.py — Watermark detector for the Undetectable Watermarking scheme.
-
-Faithfully implements Algorithm 4 (Detect_sk) from Christ et al. 2023, Section 4.3.
-
-=== What Algorithm 4 actually says (important!) ===
-
-The detector receives ONLY:
-  - The generated text  x = (x_1, ..., x_N)
-  - The secret key sk
-
-It does NOT receive the seed `r` that was frozen during generation.
-It must SEARCH for the right seed by trying every possible prefix:
-
-  For each anchor i ∈ {0, 1, ..., N-1}:
-      r^(i) = (x_1, ..., x_i)         ← candidate PRF seed
-      For each later bit j > i:
-          v_j = Fsk(r^(i), j)       if x_j = 1
-                1 - Fsk(r^(i), j)   if x_j = 0
-      score^(i) = Σ_{j=i+1}^{N} ln(1 / v_j)
-      if score^(i) > (N - i) + λ * sqrt(N - i):
-          return True   ← watermark detected
-
-=== Why this works ===
-
-  Under H0 (no watermark):   v_j ~ Uniform[0,1]  →  E[ln(1/v_j)] = 1
-                              score ≈ (N - i)  for any candidate r^(i)
-
-  Under H1 (watermarked):    If r^(i) happens to be the TRUE seed used during
-                              generation, then x_j correlates with Fsk(r^(i), j):
-                                  x_j = 1 iff Fsk(r, j) ≤ p_j(1)
-                              → v_j is biased large → ln(1/v_j) is biased small
-  
-  WAIT — that means the watermarked score should be BELOW (N-i), not above?
-  Let's recheck. When x_j=1 (prob p1) and the PRF was used: Fsk ≤ p1 → Fsk ~ U[0,p1].
-  v_j = Fsk ~ U[0, p1].  E[ln(1/v_j)] = 1 - ln(p1).
-  When x_j=0 (prob 1-p1): Fsk > p1 → Fsk ~ U[p1, 1].
-  v_j = 1 - Fsk ~ U[0, 1-p1]. E[ln(1/v_j)] = 1 - ln(1-p1).
-  Net: E[ln(1/v_j) | watermark, correct r] = Σ_x p_x * (1 - ln(p_x)) = H(p) + 1 ≥ 1.
-
-  So the expectation is H(p) + 1 ≥ 1 (equality only when model is uniform).
-  Under H0 (wrong r), E[ln(1/v_j)] = 1 regardless of the bit.
-  Detection fires when score is ABOVE (N-i): correct, because H(p) ≥ 0.
-
-=== Our implementation adaptation ===
-
-In our binarized scheme, the Phase-1 seed `r` is the sequence of Phase-1 TOKEN IDs
-(not raw bits). The Phase-2 region is stored in `bit_trace` with:
-    - entry["x"]       : the chosen bit (0 or 1)
-    - entry["bit_pos"] : the global bit counter used during generation
-
-We try every prefix of the Phase-1 token sequence as a candidate seed:
-    r^(i) = tuple(phase1_token_ids[:i])   for i in 0..len(phase1_token_ids)
-
-For each candidate, we compute the score over ALL Phase-2 bits in bit_trace.
-
-Usage
------
-    detector = WatermarkDetector(key=bytes.fromhex(key_hex), lambda_entropy=10.0)
-    det = detector.detect(result)          # annotates single result dict
-    results = detector.detect_batch(results, true_labels=[1, 1, 0, 0, ...])
-    metrics = detector.compute_metrics(results)
-"""
-
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -83,8 +19,8 @@ class WatermarkDetector:
             threshold = L + threshold_sigma * sqrt(L)
         where L = number of Phase-2 bits being tested.
 
-        The paper uses λ as this multiplier. With λ=10 and L≈1000 bits this
-        gives threshold = 1000 + 316, which the watermarked score exceeds
+        The paper uses λ as this multiplier. With λ=5.0 and L≈1000 bits this
+        gives threshold = 1000 + 158, which the watermarked score exceeds
         reliably when the model has moderate per-bit entropy. Use smaller
         values (e.g. 2.0–3.0) for short outputs or low-entropy models.
 
@@ -95,16 +31,16 @@ class WatermarkDetector:
     def __init__(
         self,
         key: bytes,
-        lambda_entropy: float = 10.0,
+        lambda_entropy: float = 5.0,
+        tokenizer: Any = None,
         threshold_sigma: float = None,
     ) -> None:
         self.key = key
         self.lam = lambda_entropy
-        # threshold_sigma controls detection sensitivity.
-        # Paper uses λ, but λ=10 is too strict for short outputs with low per-bit entropy.
-        # Default 2.0 gives ~97.5% true-positive rate under H1 while keeping good FPR.
-        # Increase toward λ for stronger cryptographic guarantees.
-        self.threshold_sigma = threshold_sigma if threshold_sigma is not None else 2.0
+        # Default to self.lam so that the detection constraint directly reflects
+        # the user's chosen lambda bound as per algorithm theory.
+        self.threshold_sigma = threshold_sigma if threshold_sigma is not None else self.lam
+        self.tokenizer = tokenizer
 
     # ------------------------------------------------------------------ #
     #  Core detection (Algorithm 4)                                       #
@@ -114,12 +50,21 @@ class WatermarkDetector:
         """
         Run Algorithm 4 — stateless detector via token ID bits reconstruction.
         """
-        all_tokens  = result.get("all_tokens", [])
-        gen_ids: List[int] = result.get("generated_ids", [])
-        bit_length: Optional[int] = result.get("bit_length")
-        N           = len(all_tokens)
+        gen_ids = result.get("generated_ids")
+        all_tokens = result.get("all_tokens")
+        
+        if not gen_ids or not all_tokens:
+            generated_text = result.get("generated_text", "")
+            if not generated_text or self.tokenizer is None:
+                return _empty_detection()
 
-        if N == 0 or not gen_ids or bit_length is None:
+            gen_ids = self.tokenizer.encode(generated_text, add_special_tokens=False)
+            all_tokens = self.tokenizer.convert_ids_to_tokens(gen_ids)
+
+        bit_length: Optional[int] = result.get("bit_length")
+        N = len(all_tokens)
+
+        if N == 0:
             return _empty_detection()
 
         # ------------------------------------------------------------------ #
@@ -137,7 +82,7 @@ class WatermarkDetector:
             stat:  float = 0.0
             n_rem: int   = 0
 
-            for step in range(i, N):
+            for step in range(i+1, N):
                 actual_tid = int(gen_ids[step])
                 for bit_idx in range(bit_length):
                     x_j     = (actual_tid >> (bit_length - 1 - bit_idx)) & 1
@@ -152,7 +97,16 @@ class WatermarkDetector:
 
             threshold_i = float(n_rem) + self.threshold_sigma * math.sqrt(float(n_rem))
             if stat > threshold_i:
-                detected = True
+                detection: Dict[str, Any] = {
+                    "detected":        True,
+                    "best_stat":       stat,
+                    "best_anchor":     i,
+                    "detection_score": (stat - float(n_rem)) / math.sqrt(float(n_rem)) if n_rem > 0 else 0.0,
+                    "num_bits":        n_rem,
+                    "threshold":       self.threshold_sigma,
+                }
+                result["detection"] = detection
+                return detection
 
             if stat > best_stat:
                 best_stat   = stat
@@ -161,12 +115,12 @@ class WatermarkDetector:
 
 
         detection: Dict[str, Any] = {
-            "detected":        detected,
+            "detected":        False,
             "best_stat":       best_stat,
             "best_anchor":     best_anchor,
-            "detection_score": best_stat,
+            "detection_score": (best_stat - float(best_n_rem)) / math.sqrt(float(best_n_rem)) if best_n_rem > 0 else 0.0,
             "num_bits":        best_n_rem,
-            "threshold":       float(best_n_rem) + self.threshold_sigma * math.sqrt(float(best_n_rem)) if best_n_rem > 0 else 0.0,
+            "threshold":       self.threshold_sigma,
         }
         result["detection"] = detection
         return detection

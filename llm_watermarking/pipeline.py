@@ -1,20 +1,3 @@
-"""
-pipeline.py — End-to-end orchestrator for the LLM Watermarking baseline.
-
-run_pipeline()
-    Iterates over prompts, calls LLMGenerator (or the active watermark scheme),
-    evaluates each result, runs watermark detection if applicable, persists
-    to disk, and returns both a raw-results list and a summary pandas DataFrame.
-
-Usage
------
-    from llm_watermarking.pipeline import run_pipeline
-    from llm_watermarking.model_loader import load_model_and_tokenizer
-
-    model, tokenizer = load_model_and_tokenizer()
-    results, df = run_pipeline(model, tokenizer)
-"""
-
 import json
 import os
 import time
@@ -66,7 +49,8 @@ def run_pipeline(
     if watermark_scheme is not None and hasattr(watermark_scheme, "key"):
         detector = WatermarkDetector(
             key=watermark_scheme.key,
-            lambda_entropy=watermark_scheme.lambda_entropy
+            lambda_entropy=watermark_scheme.lambda_entropy,
+            tokenizer=tokenizer
         )
 
     results: List[dict] = []

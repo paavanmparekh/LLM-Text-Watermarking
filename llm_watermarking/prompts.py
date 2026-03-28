@@ -21,11 +21,21 @@ from typing import List, Optional
 
 
 DEFAULT_PROMPTS: List[str] = [
-    # "Instruct: Explain the concept of zero-knowledge proofs.\nOutput:",
-    # "Instruct: Write a short summary about the history of the Roman Empire.\nOutput:",
-    # "Instruct: What are the main differences between classical computing and quantum computing?\nOutput:",
-    "Instruct: Describe a futuristic city in the year 2050 using vivid imagery.\nOutput:",
-    "Instruct: Provide a step-by-step guide to baking a chocolate cake.\nOutput:",
+    # LOW ENTROPY: Highly constrained, deterministic facts and structured lists
+    "Instruct: List the first ten elements of the periodic table in exact order.\nOutput:",
+    "Instruct: State the mathematical formula for the area of a circle and define its variables.\nOutput:",
+    "Instruct: Recite the exact opening paragraph of the United States Declaration of Independence.\nOutput:",
+
+    # MEDIUM ENTROPY: Standard Q&A, explanations, instructional (content is factual but phrasing varies)
+    "Instruct: Provide a step-by-step guide to baking a basic chocolate cake.\nOutput:",
+    "Instruct: Explain the concept of zero-knowledge proofs to a high school computer science student.\nOutput:",
+    "Instruct: Write a short summary analyzing the primary reasons for the fall of the Roman Empire.\nOutput:",
+    "Instruct: Describe the mechanical process of how a standard four-stroke internal combustion engine works.\nOutput:",
+
+    # HIGH ENTROPY: Creative, abstract, open-ended brainstorming (infinite valid paths)
+    "Instruct: Describe a chaotic, neon-lit cyberpunk market in the year 2099 using vivid, sensory imagery.\nOutput:",
+    "Instruct: Write a surreal, abstract freestyle poem about the fleeting nature of time and distant memories.\nOutput:",
+    "Instruct: Brainstorm five completely unique and wildly impractical ideas for a futuristic kitchen appliance.\nOutput:",
 ]
 
 

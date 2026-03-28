@@ -204,12 +204,13 @@ def plot_detection_scores(
     sns.set_theme(style="whitegrid")
     labels  = [f"P{i+1}" for i in range(len(results))]
     scores  = [r["detection"].get("detection_score", 0.0) for r in results]
-    colors  = ["crimson" if s > 3.0 else "steelblue" for s in scores]
+    lam     = results[0].get("lambda_entropy", 3.0) if results else 3.0
+    colors  = ["crimson" if s > lam else "steelblue" for s in scores]
 
     fig, ax = plt.subplots(figsize=(max(8, 2 * len(results)), 5))
     bars = ax.bar(labels, scores, color=colors, edgecolor="black", linewidth=0.7)
     ax.axhline(0,   color="black",  linewidth=1.0, linestyle="-",  label="Null (0)")
-    ax.axhline(3.0, color="red",    linewidth=1.5, linestyle="--", label="Threshold (3)")
+    ax.axhline(lam, color="red",    linewidth=1.5, linestyle="--", label=f"Threshold ({lam})")
     ax.set_title("Watermark Detection Score per Prompt", fontsize=13, fontweight="bold")
     ax.set_xlabel("Prompt")
     ax.set_ylabel("Detection Score")
@@ -241,6 +242,7 @@ def plot_detection_vs_entropy(
     x_vals = [_avg_empirical(r) for r in results]
     y_vals = [r["detection"].get("detection_score", 0.0) for r in results]
     labels = [f"P{i+1}" for i in range(len(results))]
+    lam    = results[0].get("lambda_entropy", 3.0) if results else 3.0
 
     fig, ax = plt.subplots(figsize=(7, 5))
     scatter = ax.scatter(x_vals, y_vals, c=y_vals, cmap="RdYlGn", s=100,
@@ -248,7 +250,7 @@ def plot_detection_vs_entropy(
     for i, lbl in enumerate(labels):
         ax.annotate(lbl, (x_vals[i], y_vals[i]),
                     textcoords="offset points", xytext=(6, 4), fontsize=8)
-    ax.axhline(3.0, color="red", linewidth=1.5, linestyle="--", label="Threshold (3)")
+    ax.axhline(lam, color="red", linewidth=1.5, linestyle="--", label=f"Threshold ({lam})")
     ax.axhline(0,   color="grey", linewidth=0.8, linestyle="-")
     plt.colorbar(scatter, ax=ax, label="Detection Score")
     ax.set_title("Detection Score vs Avg Empirical Entropy", fontsize=13, fontweight="bold")
@@ -298,7 +300,8 @@ def plot_score_distribution(
     if not (wm_scores or non_scores):
         ax.hist(all_scores, bins=15, alpha=0.7, color="steelblue", edgecolor="black")
 
-    ax.axvline(3.0, color="red", linewidth=2, linestyle="--", label="Threshold (3)")
+    lam = results[0].get("lambda_entropy", 3.0) if results else 3.0
+    ax.axvline(lam, color="red", linewidth=2, linestyle="--", label=f"Threshold ({lam})")
     ax.axvline(0.0, color="grey", linewidth=1, linestyle="-")
     ax.set_title("Distribution of Detection Scores", fontsize=13, fontweight="bold")
     ax.set_xlabel("Detection Score")

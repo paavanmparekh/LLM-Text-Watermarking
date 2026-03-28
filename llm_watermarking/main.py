@@ -85,8 +85,8 @@ def parse_args() -> argparse.Namespace:
         "--lambda",
         dest="lambda_entropy",
         type=float,
-        default=10.0,
-        help="Security parameter λ for Undetectable watermarking (default: 10.0).",
+        default=5.0,
+        help="Security parameter λ for Undetectable watermarking (default: 5.0).",
     )
     parser.add_argument(
         "--detect-only",
@@ -131,7 +131,9 @@ def main() -> None:
                 print("Error: Detection requires a watermark key.")
                 return
                 
-            detector = WatermarkDetector(bytes.fromhex(key_hex), lam)
+            _, tokenizer = load_model_and_tokenizer(cfg)
+                
+            detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
             
             # Since we're just loading one file, we don't have true labels for
             # mixed metrics, but we can set them all to 1 if it was a watermarked run

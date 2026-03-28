@@ -1,30 +1,3 @@
-"""
-watermarks/undetectable.py — Undetectable Watermarking scheme (Christ et al. 2023).
-
-Implements Algorithm 3 (Wat_sk) from Section 4.3:
-  - Phase 1 (H < λ): sample tokens normally from the model, accumulating empirical
-    entropy H += -log2 p(x_i). This "burn-in" collects λ bits of true randomness.
-  - Once H ≥ λ: freeze r = (x_1,...,x_i) as the PRF seed.
-  - Phase 2 (H ≥ λ): x_i = 1 iff F_sk(r, global_bit_pos) ≤ p_i(1).
-
-PRF: HMAC-SHA256 keyed on `sk`, input = JSON([r_list, global_bit_pos]).
-     Output mapped to [0,1] by treating the full 256-bit hash as an int
-     and dividing by 2^256 - 1.
-
-λ choice: OrZamir's repo skips the entropy phase entirely (uses position index
-as PRF seed). We implement the paper faithfully with λ=20 bits (default) — this
-means roughly the first ~3-5 tokens (depending on model entropy) are sampled
-normally before watermarking begins. We default to λ=10 bits (for robust ML
-dataset metrics under 300 tokens), though the paper originally uses 20 bits for
-strict cryptographic guarantees.
-
-Usage
------
-    scheme = UndetectableWatermark(cfg, key=b"...", lambda_entropy=10.0)
-    result = scheme.generate(model, tokenizer, prompt)
-    # result["bit_trace"]  — list of per-bit records for detection
-    # result["key_hex"]    — hex-encoded secret key
-"""
 
 import hashlib
 import hmac
@@ -88,10 +61,12 @@ class UndetectableWatermark:
         self,
         cfg: Config = None,
         key: bytes = None,
-        lambda_entropy: float = 10.0,
+        lambda_entropy: float = 5.0,
     ) -> None:
         self.cfg = cfg or default_config
-        self.key = key if key is not None else os.urandom(32)
+        # Use fixed key by default for consistency across project runs
+        default_key = bytes.fromhex("7ba6c066a1f7784bf688f01556d92f7f45d2b9ec1039b4dfdfc4af07a07974f8")
+        self.key = key if key is not None else default_key
         self.lambda_entropy = lambda_entropy
 
     # ------------------------------------------------------------------ #
@@ -187,16 +162,13 @@ class UndetectableWatermark:
 
                 if in_phase1:
                     chosen = 1 if torch.rand(1).item() < prob_1 else 0
-                    token_id += chosen
-                    chosen_prob = prob_1 if chosen == 1 else prob_0
-                    token_log_prob += math.log2(chosen_prob) if chosen_prob > 0.0 else -1000.0
                 else:
                     prf_val = _prf(self.key, r, step * bit_length + bit_idx)
                     chosen = 1 if prf_val <= prob_1 else 0
-                    token_id += chosen
-                    chosen_prob = prob_1 if chosen == 1 else prob_0
-                    token_log_prob += math.log2(chosen_prob) if chosen_prob > 0.0 else -1000.0
-
+                
+                token_id += chosen
+                chosen_prob = prob_1 if chosen == 1 else prob_0
+                token_log_prob += math.log2(chosen_prob) if chosen_prob > 0.0 else -1000.0
             # ---- clamp token_id ---------------------------------------- #
             token_id = min(max(token_id, 0), vocab_size - 1)
 
@@ -245,8 +217,6 @@ class UndetectableWatermark:
             "key_hex":                      self.key.hex(),
             "lambda_entropy":               self.lambda_entropy,
             "phase1_tokens":                phase1_count,
-            # all_tokens and generated_ids let the detector reconstruct
-            # bit decisions without any stored trace or model re-run.
             "all_tokens":                   list(tokenizer.convert_ids_to_tokens(generated_ids)),
             "generated_ids":                generated_ids,
         }

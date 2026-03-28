@@ -1,0 +1,15 @@
+# Baseline Generation (No Watermarking)
+python -m llm_watermarking.main
+
+# Undetectable Watermarking Generation
+# (This will automatically generate a random secret key and save results to outputs/undetectable_results.jsonl)
+python -m llm_watermarking.main --watermark Undetectable
+
+# Undetectable Watermark Detection
+# (Replace <YOUR_SECRET_KEY> with the actual hex key outputted during the generation step)
+python -m llm_watermarking.main --watermark Undetectable --load-results outputs/undetectable_results.jsonl --detect-only --watermark-key <YOUR_SECRET_KEY>
+
+# Optional helpful arguments:
+# --temperature 0.7         (adjust sampling temperature, default 0.7)
+# --max-tokens 150          (set max tokens per generation, default 150)
+# --output-dir custom_dir   (change output directory, default outputs/)
