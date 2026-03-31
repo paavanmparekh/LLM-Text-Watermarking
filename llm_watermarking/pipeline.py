@@ -72,9 +72,9 @@ def run_pipeline(
         gen_data["mode"] = mode_label
         eval_data = evaluator.evaluate(gen_data)
         
-        if detector and "bit_trace" in eval_data:
+        if detector and use_binary:
             det = detector.detect(eval_data)
-            print(f"  [Detect] detection_score={det['detection_score']:.2f} | detected={det['detected']}")
+            print(f"  [Detect] stat={det['stat']:.2f} | threshold={det['threshold']:.2f} | detected={det['detected']}")
             
         results.append(eval_data)
         print(f"  Done in {gen_data['generation_time']}s | {gen_data['num_tokens']} tokens")

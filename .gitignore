@@ -6,6 +6,8 @@ __pycache__/
 outputs/
 *.jsonl
 *.png
+logs/
+**/*.log
 
 # Virtual environments
 .env
