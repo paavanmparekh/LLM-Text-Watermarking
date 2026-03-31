@@ -38,6 +38,19 @@ def parse_args() -> argparse.Namespace:
              "Uses default prompts if omitted.",
     )
     parser.add_argument(
+        "--dataset",
+        type=str,
+        default=None,
+        choices=["c4"],
+        help="Use a huggingface dataset for prompts (e.g. 'c4').",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=500,
+        help="Number of samples to pull from the dataset (default: 500).",
+    )
+    parser.add_argument(
         "--max-tokens",
         type=int,
         default=150,
@@ -181,9 +194,12 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     model, tokenizer = load_model_and_tokenizer(cfg)
 
-    prompt_loader = (
-        PromptLoader.from_file(args.prompts) if args.prompts else PromptLoader()
-    )
+    if args.dataset == "c4":
+        prompt_loader = PromptLoader.from_c4(tokenizer, num_samples=args.num_samples)
+    else:
+        prompt_loader = (
+            PromptLoader.from_file(args.prompts) if args.prompts else PromptLoader()
+        )
     print(f"Using {len(prompt_loader)} prompt(s).")
 
     results, df = run_pipeline(
@@ -194,7 +210,7 @@ def main() -> None:
     )
 
     print("\n=== Summary ===")
-    print(df.to_string(index=False))
+    print("Refer to the outputs/*.csv files for the full data summary.")
 
     if not args.no_plots:
         # We don't have true negatives here to compute real F1 metrics in one go,

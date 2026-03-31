@@ -19,6 +19,9 @@ Usage
 
 from typing import List, Optional
 
+import torch
+from datasets import load_dataset
+
 
 DEFAULT_PROMPTS: List[str] = [
     # LOW ENTROPY: Highly constrained, deterministic facts and structured lists
@@ -54,6 +57,41 @@ class PromptLoader:
         """Load prompts from a plain-text file (one prompt per line)."""
         with open(filepath, "r", encoding="utf-8") as fh:
             prompts = [line.strip() for line in fh if line.strip()]
+        return cls(prompts=prompts)
+
+    @classmethod
+    def from_c4(cls, tokenizer, num_samples: int = 500) -> "PromptLoader":
+        """
+        Load prompts from the allenai/c4 (en) dataset.
+        Takes the first 30 tokens of each sample's text as the prompt.
+        """
+        print(f"Loading {num_samples} samples from allenai/c4 dataset... (this may take a moment)")
+        
+        # We use the 'validation' split because it has 8 shards instead of 1024,
+        # which loads almost instantly even with streaming=True.
+        dataset = load_dataset("allenai/c4", "en", split="validation", streaming=True)
+        
+        prompts = []
+        # Filter for texts that are long enough to actually have a decent prompt
+        # We'll just tokenize the first chunks until we get num_samples
+        for item in dataset:
+            text = item["text"]
+            # Rough fast filter: text must be at least ~150 chars to likely have 30 tokens
+            if len(text) < 150:
+                continue
+                
+            # Tokenize to exact first 30 tokens
+            tokens = tokenizer(text, truncation=True, max_length=30, add_special_tokens=False)["input_ids"]
+            
+            if len(tokens) >= 30:
+                # Decode back to string
+                prompt_text = tokenizer.decode(tokens, skip_special_tokens=True)
+                prompts.append(prompt_text)
+                
+            if len(prompts) >= num_samples:
+                break
+                
+        print(f"Successfully extracted {len(prompts)} prompts from C4.")
         return cls(prompts=prompts)
 
     # ------------------------------------------------------------------

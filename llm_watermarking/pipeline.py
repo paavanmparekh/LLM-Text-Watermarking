@@ -87,6 +87,11 @@ def run_pipeline(
     print(f"Results saved → {cfg.results_path}")
 
     df = _build_summary_df(results)
+    
+    csv_path = cfg.results_path.replace(".jsonl", ".csv")
+    df.to_csv(csv_path, index=False)
+    print(f"Summary saved → {csv_path}")
+    
     return results, df
 
 

@@ -17,6 +17,7 @@ Usage
     # result["eval"]["perplexity"], result["eval"]["distinct_2"], ...
 """
 
+import math
 from typing import Any, Dict, List
 
 import torch
@@ -56,6 +57,19 @@ class Evaluator:
             return 0.0
 
         return len(set(ngrams)) / len(ngrams)
+
+    def log_diversity(self, text: str) -> float:
+        """
+        Log Diversity: log(unique unigrams) / total tokens.
+        """
+        tokens = self.tokenizer.tokenize(text)
+        if len(tokens) == 0:
+            return 0.0
+        unique = len(set(tokens))
+        if unique == 0:
+            return 0.0
+            
+        return math.log(unique) / len(tokens)
 
     # ------------------------------------------------------------------
     # Perplexity
@@ -111,6 +125,7 @@ class Evaluator:
             "distinct_1":             self.distinct_n(text, 1),
             "distinct_2":             self.distinct_n(text, 2),
             "distinct_3":             self.distinct_n(text, 3),
+            "log_diversity":          self.log_diversity(text),
             "perplexity":             self.compute_perplexity(text),
             "avg_shannon_entropy":    _safe_mean(shannon),
             "avg_empirical_entropy":  _safe_mean(surprisals),
