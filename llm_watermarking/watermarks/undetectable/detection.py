@@ -2,6 +2,7 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from .generation import _prf
+from .wm_logger import logger
 
 
 class WatermarkDetector:
@@ -14,18 +15,10 @@ class WatermarkDetector:
         Secret key matching the one used during generation.
     lambda_entropy : float
         Security parameter λ. Must match the value used during generation.
-    threshold_sigma : float
-        The σ multiplier in the detection threshold:
-            threshold = L + threshold_sigma * sqrt(L)
-        where L = number of Phase-2 bits being tested.
-
-        The paper uses λ as this multiplier. With λ=5.0 and L≈1000 bits this
-        gives threshold = 1000 + 158, which the watermarked score exceeds
-        reliably when the model has moderate per-bit entropy. Use smaller
-        values (e.g. 2.0–3.0) for short outputs or low-entropy models.
-
-        Default: lambda_entropy (paper-faithful). Override if sequences are
-        short and detection fails.
+        Detection threshold per anchor i:
+            threshold = n_rem + λ * sqrt(n_rem)
+        where n_rem = number of Phase-2 bits being scored.
+        Watermark is declared present when stat > threshold directly.
     """
 
     def __init__(
@@ -33,13 +26,9 @@ class WatermarkDetector:
         key: bytes,
         lambda_entropy: float = 5.0,
         tokenizer: Any = None,
-        threshold_sigma: float = None,
     ) -> None:
         self.key = key
         self.lam = lambda_entropy
-        # Default to self.lam so that the detection constraint directly reflects
-        # the user's chosen lambda bound as per algorithm theory.
-        self.threshold_sigma = threshold_sigma if threshold_sigma is not None else self.lam
         self.tokenizer = tokenizer
 
     # ------------------------------------------------------------------ #
@@ -48,81 +37,116 @@ class WatermarkDetector:
 
     def detect(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Run Algorithm 4 — stateless detector via token ID bits reconstruction.
+        Run Algorithm 4 — true stateless detector via text re-tokenization.
         """
-        gen_ids = result.get("generated_ids")
-        all_tokens = result.get("all_tokens")
-        
-        if not gen_ids or not all_tokens:
-            generated_text = result.get("generated_text", "")
-            if not generated_text or self.tokenizer is None:
-                return _empty_detection()
+        if self.tokenizer is None:
+            raise ValueError("WatermarkDetector requires tokenizer to operate in true stateless mode.")
 
-            gen_ids = self.tokenizer.encode(generated_text, add_special_tokens=False)
-            all_tokens = self.tokenizer.convert_ids_to_tokens(gen_ids)
+        # In the real world, the detector ONLY receives the suspicious text, never the prompt!
+        gen_text = result.get("generated_text", "")
+        prompt   = result.get("prompt", "")[:60]
+
+        logger.info(f"--- DETECT | prompt='{prompt}...'")
+
+        if not gen_text:
+            logger.warning("  Empty generated_text — returning empty detection.")
+            return _empty_detection()
+
+        # Tokenize the raw text. Known limitation: if the text was edited or if the tokenizer
+        # merges subwords differently without the prompt context, detection may fail (tokenization shift).
+        gen_ids    = self.tokenizer.encode(gen_text, add_special_tokens=False)
+        all_tokens = self.tokenizer.convert_ids_to_tokens(gen_ids)
 
         bit_length: Optional[int] = result.get("bit_length")
         N = len(all_tokens)
 
+        logger.info(f"  Tokens={N}, bit_length={bit_length}, λ={self.lam}")
+        logger.debug(f"  Token IDs (first 20): {gen_ids[:20]}")
+        logger.debug(f"  Tokens   (first 20): {all_tokens[:20]}")
+
         if N == 0:
+            logger.warning("  N=0 after tokenization — returning empty detection.")
+            return _empty_detection()
+
+        if bit_length is None or bit_length == 0:
+            logger.error("  bit_length missing or zero in result dict — cannot detect.")
             return _empty_detection()
 
         # ------------------------------------------------------------------ #
         #  Algorithm 4 — anchor search                                         #
         # ------------------------------------------------------------------ #
-        detected    = False
         best_stat   = float("-inf")
         best_anchor = -1
         best_n_rem  = 0
+        best_thresh = 0.0
+
 
         for i in range(N + 1):
             r_candidate: Tuple = tuple(all_tokens[:i])
 
-            # Score all bits from tokens at step >= i
+            # Score all bits from tokens at position >= i (first Phase-2 token).
+            # Paper: anchor r^(i) = (x_1,...,x_i), score j = i+1,...,L (1-indexed)
+            # = 0-indexed steps i, i+1,...,N-1.
             stat:  float = 0.0
             n_rem: int   = 0
 
-            for step in range(i+1, N):
+            for step in range(i, N):
                 actual_tid = int(gen_ids[step])
                 for bit_idx in range(bit_length):
                     x_j     = (actual_tid >> (bit_length - 1 - bit_idx)) & 1
                     bit_pos = step * bit_length + bit_idx
                     f_val   = _prf(self.key, r_candidate, bit_pos)
                     v_j     = f_val if x_j == 1 else (1.0 - f_val)
-                    stat   += math.log(1.0 / v_j)
-                    n_rem  += 1
+                    if v_j <= 0.0:
+                        continue  # skip degenerate bits silently
+                    stat  += math.log(1.0 / v_j)
+                    n_rem += 1
 
             if n_rem == 0:
                 continue
 
-            threshold_i = float(n_rem) + self.threshold_sigma * math.sqrt(float(n_rem))
+            threshold_i = float(n_rem) + self.lam * math.sqrt(float(n_rem))
+
+
             if stat > threshold_i:
                 detection: Dict[str, Any] = {
                     "detected":        True,
-                    "best_stat":       stat,
+                    "stat":            stat,
+                    "threshold":       threshold_i,
                     "best_anchor":     i,
-                    "detection_score": (stat - float(n_rem)) / math.sqrt(float(n_rem)) if n_rem > 0 else 0.0,
+                    "detection_score": stat,
                     "num_bits":        n_rem,
-                    "threshold":       self.threshold_sigma,
                 }
                 result["detection"] = detection
+                logger.info(
+                    f"  WATERMARK DETECTED at anchor i={i} | "
+                    f"stat={stat:.4f} > threshold={threshold_i:.4f} | bits={n_rem}"
+                )
                 return detection
 
+            # Track the anchor that produced the highest stat (for reporting)
             if stat > best_stat:
                 best_stat   = stat
                 best_anchor = i
                 best_n_rem  = n_rem
+                best_thresh = threshold_i
 
-
+        # ---------------------------------------------------------------- #
+        #  Not detected — report the best anchor seen                       #
+        # ---------------------------------------------------------------- #
         detection: Dict[str, Any] = {
             "detected":        False,
-            "best_stat":       best_stat,
+            "stat":            best_stat if best_stat > float("-inf") else 0.0,
+            "threshold":       best_thresh,
             "best_anchor":     best_anchor,
-            "detection_score": (best_stat - float(best_n_rem)) / math.sqrt(float(best_n_rem)) if best_n_rem > 0 else 0.0,
+            "detection_score": best_stat if best_stat > float("-inf") else 0.0,
             "num_bits":        best_n_rem,
-            "threshold":       self.threshold_sigma,
         }
         result["detection"] = detection
+        logger.info(
+            f"  NOT detected | best_stat={detection['stat']:.4f} at anchor={best_anchor} "
+            f"| threshold={best_thresh:.4f} | bits={best_n_rem}"
+        )
         return detection
 
 
@@ -190,11 +214,16 @@ class WatermarkDetector:
                      if (precision + tpr) > 0 else 0.0)
         accuracy  = (tp + tn) / (tp + fp + tn + fn) if (tp + fp + tn + fn) > 0 else 0.0
 
-        return {
+        metrics = {
             "tp": tp, "fp": fp, "tn": tn, "fn": fn,
             "tpr": tpr, "fpr": fpr, "tnr": tnr, "fnr": fnr,
             "precision": precision, "f1": f1, "accuracy": accuracy,
         }
+        logger.info(
+            f"  METRICS | TP={tp} FP={fp} TN={tn} FN={fn} | "
+            f"TPR={tpr:.3f} FPR={fpr:.3f} Acc={accuracy:.3f} F1={f1:.3f}"
+        )
+        return metrics
 
 
 # ------------------------------------------------------------------ #
@@ -204,10 +233,9 @@ class WatermarkDetector:
 def _empty_detection() -> Dict[str, Any]:
     return {
         "detected":        False,
-        "anchor_stats":    [],
-        "best_stat":       0.0,
+        "stat":            0.0,
+        "threshold":       0.0,
         "best_anchor":     -1,
-        "min_stat":        0.0,
         "detection_score": 0.0,
         "num_bits":        0,
     }

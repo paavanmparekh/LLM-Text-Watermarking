@@ -11,6 +11,7 @@ import torch
 
 from ...binarizer import build_binary_vocab, compute_bit_probs
 from ...config import Config, config as default_config
+from .wm_logger import logger
 
 
 # ------------------------------------------------------------------ #
@@ -50,7 +51,7 @@ class UndetectableWatermark:
         Secret key. If None, a fresh random 32-byte key is generated.
     lambda_entropy : float
         Security parameter λ (bits). Phase-1 runs until H ≥ λ.
-        Default 10 bits — balanced for robust ML testing on short sequences.
+        Default 5 bits — balanced for robust ML testing on short sequences.
         OrZamir's reference implementation omits Phase 1 entirely (λ=0),
         trading the formal entropy-seed argument for simplicity.
     """
@@ -95,6 +96,7 @@ class UndetectableWatermark:
         bit_length, _, _ = build_binary_vocab(tokenizer)
         vocab_size = len(tokenizer)
         print(f"  [Undetectable] bit_length={bit_length}, vocab_size={vocab_size}, λ={self.lambda_entropy}")
+        logger.info(f"=== GENERATE | bit_length={bit_length}, vocab_size={vocab_size}, λ={self.lambda_entropy}, max_new_tokens={max_new_tokens} ===")
 
         # ---- tokenise prompt ------------------------------------------- #
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
@@ -164,7 +166,8 @@ class UndetectableWatermark:
                     chosen = 1 if torch.rand(1).item() < prob_1 else 0
                 else:
                     prf_val = _prf(self.key, r, step * bit_length + bit_idx)
-                    chosen = 1 if prf_val <= prob_1 else 0
+                    chosen  = 1 if prf_val <= prob_1 else 0
+                # NOTE: no per-bit logging here — O(tokens × bit_length) overhead
                 
                 token_id += chosen
                 chosen_prob = prob_1 if chosen == 1 else prob_0
@@ -187,6 +190,10 @@ class UndetectableWatermark:
                 if H >= self.lambda_entropy and r is None:
                     r = tuple(tokenizer.convert_ids_to_tokens(generated_ids))
                     print(f"  [Undetectable] Phase 1→2 at token {step+1}, H={H:.2f} bits")
+                    logger.info(
+                        f"  Phase 1→2 transition at step={step} (token {step+1}), "
+                        f"H={H:.4f} bits | anchor r has {len(r)} tokens: {r}"
+                    )
 
             # ---- feed token back --------------------------------------- #
             next_token = torch.tensor([[token_id]], device=model.device)
@@ -199,6 +206,20 @@ class UndetectableWatermark:
         generation_time = time.time() - t0
         generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
         n = len(token_surprisals)
+
+        phase2_tokens = n - phase1_count
+        logger.info(
+            f"  Generation done | total_tokens={n}, phase1={phase1_count}, phase2={phase2_tokens}, "
+            f"time={round(time.time()-t0,2)}s | watermarked={'YES' if r is not None else 'NO (no Phase2)'}"
+        )
+        logger.info(f"  Generated IDs (first 20): {generated_ids[:20]}")
+        if r is not None:
+            logger.info(f"  Anchor r (all {len(r)} tokens): {r}")
+        else:
+            logger.warning(
+                f"  r=None: H={H:.4f} never reached λ={self.lambda_entropy}. "
+                f"All {n} tokens were Phase-1 (randomly sampled). NO watermark embedded!"
+            )
 
         return {
             "prompt":                       prompt,
@@ -217,6 +238,4 @@ class UndetectableWatermark:
             "key_hex":                      self.key.hex(),
             "lambda_entropy":               self.lambda_entropy,
             "phase1_tokens":                phase1_count,
-            "all_tokens":                   list(tokenizer.convert_ids_to_tokens(generated_ids)),
-            "generated_ids":                generated_ids,
         }
