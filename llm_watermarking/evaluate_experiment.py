@@ -26,6 +26,8 @@ def evaluate_single_lambda(base_stats, base_bits, wm_stats, wm_bits, lam):
 
     tpr = tp / len(wm_stats) if len(wm_stats) > 0 else 0.0
     fpr = fp / len(base_stats) if len(base_stats) > 0 else 0.0
+    tnr = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
     
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tpr
@@ -35,6 +37,8 @@ def evaluate_single_lambda(base_stats, base_bits, wm_stats, wm_bits, lam):
     row = {
         "Lambda": lam,
         "TPR": round(tpr, 4),
+        "FNR": round(fnr, 4),
+        "TNR": round(tnr, 4),
         "FPR": round(fpr, 4),
         "Precision": round(precision, 4),
         "Recall": round(recall, 4),

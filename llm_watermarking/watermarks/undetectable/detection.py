@@ -74,19 +74,23 @@ class WatermarkDetector:
 
         # ------------------------------------------------------------------ #
         #  Algorithm 4 — anchor search                                         #
+        #  Iterate every candidate anchor i = 0..N.                           #
+        #  Detection is binary: if any anchor produces stat > threshold        #
+        #  → watermark detected. Return immediately.                           #
+        #  If no anchor crosses threshold → not detected, but still report     #
+        #  the best stat seen across all anchors for score distribution         #
+        #  comparisons between watermarked and unwatermarked text.             #
         # ------------------------------------------------------------------ #
+
         best_stat   = float("-inf")
         best_anchor = -1
         best_n_rem  = 0
         best_thresh = 0.0
 
-
         for i in range(N + 1):
             r_candidate: Tuple = tuple(all_tokens[:i])
 
-            # Score all bits from tokens at position >= i (first Phase-2 token).
-            # Paper: anchor r^(i) = (x_1,...,x_i), score j = i+1,...,L (1-indexed)
-            # = 0-indexed steps i, i+1,...,N-1.
+            # Score all bits from tokens at position >= i (Phase-2 onward).
             stat:  float = 0.0
             n_rem: int   = 0
 
@@ -98,7 +102,7 @@ class WatermarkDetector:
                     f_val   = _prf(self.key, r_candidate, bit_pos)
                     v_j     = f_val if x_j == 1 else (1.0 - f_val)
                     if v_j <= 0.0:
-                        continue  # skip degenerate bits silently
+                        continue
                     stat  += math.log(1.0 / v_j)
                     n_rem += 1
 
@@ -107,13 +111,15 @@ class WatermarkDetector:
 
             threshold_i = float(n_rem) + self.lam * math.sqrt(float(n_rem))
 
+            logger.debug(f"  anchor i={i} | stat={stat:.4f} | threshold={threshold_i:.4f} | bits={n_rem}")
 
+            # Binary detection decision — return immediately on first hit.
             if stat > threshold_i:
                 detection: Dict[str, Any] = {
                     "detected":        True,
                     "stat":            stat,
                     "threshold":       threshold_i,
-                    "best_anchor":     i,
+                    "anchor":          i,
                     "detection_score": stat,
                     "num_bits":        n_rem,
                 }
@@ -124,7 +130,7 @@ class WatermarkDetector:
                 )
                 return detection
 
-            # Track the anchor that produced the highest stat (for reporting)
+            # Track best stat across all anchors for reporting purposes.
             if stat > best_stat:
                 best_stat   = stat
                 best_anchor = i
@@ -132,19 +138,21 @@ class WatermarkDetector:
                 best_thresh = threshold_i
 
         # ---------------------------------------------------------------- #
-        #  Not detected — report the best anchor seen                       #
+        #  Not detected — report the best stat seen across all anchors.     #
+        #  detection_score is always populated for distribution comparison. #
         # ---------------------------------------------------------------- #
+        best_stat_val = best_stat if best_stat > float("-inf") else 0.0
         detection: Dict[str, Any] = {
             "detected":        False,
-            "stat":            best_stat if best_stat > float("-inf") else 0.0,
+            "stat":            best_stat_val,
             "threshold":       best_thresh,
-            "best_anchor":     best_anchor,
-            "detection_score": best_stat if best_stat > float("-inf") else 0.0,
+            "anchor":          best_anchor,
+            "detection_score": best_stat_val,
             "num_bits":        best_n_rem,
         }
         result["detection"] = detection
         logger.info(
-            f"  NOT detected | best_stat={detection['stat']:.4f} at anchor={best_anchor} "
+            f"  NOT detected | best_stat={best_stat_val:.4f} at anchor={best_anchor} "
             f"| threshold={best_thresh:.4f} | bits={best_n_rem}"
         )
         return detection
@@ -235,7 +243,7 @@ def _empty_detection() -> Dict[str, Any]:
         "detected":        False,
         "stat":            0.0,
         "threshold":       0.0,
-        "best_anchor":     -1,
+        "anchor":          -1,
         "detection_score": 0.0,
         "num_bits":        0,
     }

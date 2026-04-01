@@ -372,9 +372,8 @@ def plot_detection_metrics(
         Output of WatermarkDetector.compute_metrics(); required for
         plot_detection_metrics_bar.
     """
-    plot_detection_scores(results, output_dir)
-    plot_detection_vs_entropy(results, output_dir)
-    plot_score_distribution(results, output_dir)
+    # plot_detection_scores, plot_detection_vs_entropy, plot_score_distribution
+    # intentionally removed — threshold line was misleading (shows λ, not per-anchor threshold)
     if detector_metrics:
         plot_detection_metrics_bar(detector_metrics, output_dir)
 
@@ -394,7 +393,7 @@ def plot_evaluation_metrics(
     detector_metrics : dict, optional
         Output of WatermarkDetector.compute_metrics() for the metrics bar chart.
     """
-    plot_entropy_trajectories(results, output_dir)
+    # plot_entropy_trajectories intentionally removed
     plot_entropy_distributions(results, output_dir)
     plot_entropy_aggregate(results, output_dir)
     plot_heatmap(results, output_dir)
