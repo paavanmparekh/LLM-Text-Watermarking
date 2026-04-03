@@ -11,21 +11,18 @@ from llm_watermarking.model_loader import load_model_and_tokenizer
 from llm_watermarking.watermarks.undetectable import WatermarkDetector
 
 
-def check_detected(stat, n_rem, lam):
-    if n_rem == 0:
-        return False
-    return stat > float(n_rem) + lam * math.sqrt(float(n_rem))
 
 
-def evaluate_single_lambda(base_stats, base_bits, wm_stats, wm_bits, lam):
-    tp = sum(check_detected(s, b, lam) for s, b in zip(wm_stats, wm_bits))
-    fn = len(wm_stats) - tp
+
+def evaluate_single_lambda(base_detects, wm_detects, lam):
+    tp = sum(wm_detects)
+    fn = len(wm_detects) - tp
     
-    fp = sum(check_detected(s, b, lam) for s, b in zip(base_stats, base_bits))
-    tn = len(base_stats) - fp
+    fp = sum(base_detects)
+    tn = len(base_detects) - fp
 
-    tpr = tp / len(wm_stats) if len(wm_stats) > 0 else 0.0
-    fpr = fp / len(base_stats) if len(base_stats) > 0 else 0.0
+    tpr = tp / len(wm_detects) if len(wm_detects) > 0 else 0.0
+    fpr = fp / len(base_detects) if len(base_detects) > 0 else 0.0
     tnr = tn / (tn + fp) if (tn + fp) > 0 else 0.0
     fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
     
@@ -35,7 +32,6 @@ def evaluate_single_lambda(base_stats, base_bits, wm_stats, wm_bits, lam):
     acc = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0.0
 
     row = {
-        "Lambda": lam,
         "TPR": round(tpr, 4),
         "FNR": round(fnr, 4),
         "TNR": round(tnr, 4),
@@ -60,53 +56,72 @@ def evaluate_single_lambda(base_stats, base_bits, wm_stats, wm_bits, lam):
     print(df.to_string(index=False))
 
 
-def generate_table_2_csv(base_results, wm_results, lam):
-    def get_metric(results, key):
-        return [r["eval"][key] for r in results if "eval" in r and key in r["eval"]]
+def generate_table_2_csv(base_results, wm_results):
+    rows = []
+    
+    base_ppls = []
+    wm_ppls = []
+    base_divs = []
+    wm_divs = []
+
+    for b_res, w_res in zip(base_results, wm_results):
+        prompt = b_res.get("prompt", "")
+        nw_text = b_res.get("generated_text", "")
+        w_text = w_res.get("generated_text", "")
         
-    base_ppl = get_metric(base_results, "perplexity")
-    wm_ppl = get_metric(wm_results, "perplexity")
-    base_log = get_metric(base_results, "log_diversity")
-    wm_log = get_metric(wm_results, "log_diversity")
+        w_eval = w_res.get("eval", {})
+        b_eval = b_res.get("eval", {})
+        
+        # average empirical entropy
+        if "avg_empirical_entropy" in w_eval:
+            avg_emp_ent = w_eval["avg_empirical_entropy"]
+        else:
+            surprisals = w_res.get("token_surprisals", [])
+            avg_emp_ent = sum(surprisals)/len(surprisals) if surprisals else 0.0
+            
+        b_ppl = b_eval.get("perplexity", 0.0)
+        w_ppl = w_eval.get("perplexity", 0.0)
+        
+        b_div = b_eval.get("log_diversity", 0.0)
+        w_div = w_eval.get("log_diversity", 0.0)
+        
+        base_ppls.append(b_ppl)
+        wm_ppls.append(w_ppl)
+        base_divs.append(b_div)
+        wm_divs.append(w_div)
+        
+        rows.append({
+            "Prompt": prompt,
+            "No Watermarked Response": nw_text,
+            "Watermarked Response": w_text,
+            "Avg Empirical Entropy (Watermarked text)": round(avg_emp_ent, 4) if avg_emp_ent else "",
+            "PPL (No Watermarked)": round(b_ppl, 2) if b_ppl else "",
+            "PPL (Watermarked)": round(w_ppl, 2) if w_ppl else ""
+        })
 
-    def mean_std(arr):
-        if not arr: return 0.0, 0.0
-        return np.mean(arr), np.std(arr)
+    # Deltas
+    b_ppl_m = np.mean(base_ppls) if base_ppls else 0.0
+    w_ppl_m = np.mean(wm_ppls) if wm_ppls else 0.0
+    delta_ppl = w_ppl_m - b_ppl_m
 
-    b_ppl_m, b_ppl_s = mean_std(base_ppl)
-    w_ppl_m, w_ppl_s = mean_std(wm_ppl)
-    b_log_m, _ = mean_std(base_log)
-    w_log_m, _ = mean_std(wm_log)
+    b_div_m = np.mean(base_divs) if base_divs else 0.0
+    w_div_m = np.mean(wm_divs) if wm_divs else 0.0
+    delta_div = w_div_m - b_div_m
 
-    rows = [
-        {
-            "Lambda_Run": lam,
-            "Metric": "Perplexity",
-            "Watermarked_Mean": round(w_ppl_m, 2),
-            "Watermarked_Std": round(w_ppl_s, 2),
-            "Unwatermarked_Mean": round(b_ppl_m, 2),
-            "Unwatermarked_Std": round(b_ppl_s, 2),
-            "Delta": round(w_ppl_m - b_ppl_m, 3)
-        },
-        {
-            "Lambda_Run": lam,
-            "Metric": "Log_Diversity",
-            "Watermarked_Mean": round(w_log_m, 3),
-            "Watermarked_Std": 0.0,
-            "Unwatermarked_Mean": round(b_log_m, 3),
-            "Unwatermarked_Std": 0.0,
-            "Delta": round(w_log_m - b_log_m, 3)
-        }
-    ]
+    rows.append({
+        "Prompt": "--- DELTAS ---",
+        "No Watermarked Response": "",
+        "Watermarked Response": "",
+        "Avg Empirical Entropy (Watermarked text)": "",
+        "PPL (No Watermarked)": f"Delta PPL: {delta_ppl:.3f}",
+        "PPL (Watermarked)": f"Delta Diversity: {delta_div:.3f}"
+    })
+
     df = pd.DataFrame(rows)
     out_path = "outputs/table2_quality_metrics.csv"
-    
-    if os.path.exists(out_path):
-        df.to_csv(out_path, mode='a', header=False, index=False)
-    else:
-        df.to_csv(out_path, index=False)
+    df.to_csv(out_path, index=False)
         
-    print(f"Quality metrics for Lambda={lam} appended to -> {out_path}")
+    print(f"Table 2 (Quality metrics) saved to -> {out_path}")
 
 
 def main():
@@ -139,22 +154,20 @@ def main():
     detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
 
     print("\n--- Running detection on Base Responses (unwatermarked) ---")
-    base_stats, base_bits = [], []
+    base_detects = []
     for res in base_results:
         det = detector.detect(res)
-        base_stats.append(det["stat"])
-        base_bits.append(det["num_bits"])
+        base_detects.append(det["detected"])
 
     print("--- Running detection on Watermarked Responses ---")
-    wm_stats, wm_bits = [], []
+    wm_detects = []
     for res in wm_results:
         det = detector.detect(res)
-        wm_stats.append(det["stat"])
-        wm_bits.append(det["num_bits"])
+        wm_detects.append(det["detected"])
 
     print("\n" + "="*80)
-    evaluate_single_lambda(base_stats, base_bits, wm_stats, wm_bits, lam)
-    generate_table_2_csv(base_results, wm_results, lam)
+    evaluate_single_lambda(base_detects, wm_detects, lam)
+    generate_table_2_csv(base_results, wm_results)
     print("="*80 + "\n")
 
 

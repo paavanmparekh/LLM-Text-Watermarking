@@ -42,7 +42,6 @@ class BaselineLogitTracker(LogitsProcessor):
 
     * shannon_entropies        — H(D_i) in bits for each step i
     * token_surprisals         — -log₂ p(x_i | x_{<i}) after sampling
-    * cumulative_empirical     — running sum of token_surprisals
     * total_empirical          — final empirical entropy H_e(x)
 
     The tracker is inserted into HuggingFace's LogitsProcessorList,
@@ -61,7 +60,6 @@ class BaselineLogitTracker(LogitsProcessor):
     def reset(self) -> None:
         self.shannon_entropies: List[float] = []
         self.token_surprisals: List[float] = []
-        self.cumulative_empirical: List[float] = []
         self.total_empirical: float = 0.0
         self._last_log_probs: Optional[torch.Tensor] = None
         # top-k: list of lists, one per step → [(token_id, prob), ...]
@@ -82,7 +80,6 @@ class BaselineLogitTracker(LogitsProcessor):
 
             self.token_surprisals.append(surprisal)
             self.total_empirical += surprisal
-            self.cumulative_empirical.append(self.total_empirical)
 
         # Apply temperature and top_p to a CLONE of the scores
         warped_scores = self.warpers(input_ids, scores.clone())
@@ -162,7 +159,6 @@ class LLMGenerator:
         dict with keys:
             prompt, generated_text, num_tokens,
             shannon_entropies, token_surprisals,
-            cumulative_empirical_entropy,
             total_empirical_entropy, total_shannon_entropy
         """
         max_new_tokens = max_new_tokens or self.cfg.max_new_tokens
@@ -206,7 +202,6 @@ class LLMGenerator:
             "generation_time":              round(generation_time, 2),
             "shannon_entropies":            tracker.shannon_entropies[:n],
             "token_surprisals":             tracker.token_surprisals,
-            "cumulative_empirical_entropy": tracker.cumulative_empirical,
             "total_empirical_entropy":      tracker.total_empirical,
             "total_shannon_entropy":        sum(tracker.shannon_entropies[:n]),
             "top_k_distributions":          tracker.top_k_distributions[:n],

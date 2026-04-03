@@ -111,7 +111,6 @@ class UndetectableWatermark:
         # ---- metric accumulators --------------------------------------- #
         shannon_entropies: List[float] = []
         token_surprisals: List[float] = []
-        cumulative_empirical: List[float] = []
         total_empirical: float = 0.0
         generated_ids: List[int] = []
         phase1_count: int = 0
@@ -179,7 +178,6 @@ class UndetectableWatermark:
             surprisal = -token_log_prob
             total_empirical += surprisal
             token_surprisals.append(surprisal)
-            cumulative_empirical.append(total_empirical)
             shannon_entropies.append(token_shannon)
             generated_ids.append(token_id)
 
@@ -228,7 +226,6 @@ class UndetectableWatermark:
             "generation_time":              round(generation_time, 2),
             "shannon_entropies":            shannon_entropies,
             "token_surprisals":             token_surprisals,
-            "cumulative_empirical_entropy": cumulative_empirical,
             "total_empirical_entropy":      total_empirical,
             "total_shannon_entropy":        sum(shannon_entropies),
             "top_k_distributions":          [],

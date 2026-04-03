@@ -21,7 +21,7 @@ from .config import Config
 from .model_loader import load_model_and_tokenizer
 from .pipeline import load_results, run_pipeline
 from .prompts import PromptLoader
-from .visualization import plot_evaluation_metrics, plot_detection_metrics
+from .visualization import plot_evaluation_metrics
 from .watermarks import WATERMARK_REGISTRY
 from .watermarks.undetectable import WatermarkDetector
 
@@ -159,12 +159,7 @@ def main() -> None:
             if is_wm:
                 metrics = detector.compute_metrics(results)
                 print(f"\nDetection Metrics: TPR={metrics['tpr']:.2f}, F1={metrics['f1']:.2f}")
-                if not args.no_plots:
-                    plot_detection_metrics(results, output_dir=args.output_dir, detector_metrics=metrics)
-            else:
-                if not args.no_plots:
-                    plot_detection_metrics(results, output_dir=args.output_dir)
-                    
+
             return
 
         # Regular reload (just plot everything)
