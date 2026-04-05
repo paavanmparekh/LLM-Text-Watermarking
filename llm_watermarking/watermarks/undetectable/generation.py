@@ -210,7 +210,7 @@ class UndetectableWatermark:
             f"  Generation done | total_tokens={n}, phase1={phase1_count}, phase2={phase2_tokens}, "
             f"time={round(time.time()-t0,2)}s | watermarked={'YES' if r is not None else 'NO (no Phase2)'}"
         )
-        logger.info(f"  Generated IDs (first 20): {generated_ids[:20]}")
+        #logger.info(f"  Generated IDs (first 20): {generated_ids[:20]}")
         if r is not None:
             logger.info(f"  Anchor r (all {len(r)} tokens): {r}")
         else:
