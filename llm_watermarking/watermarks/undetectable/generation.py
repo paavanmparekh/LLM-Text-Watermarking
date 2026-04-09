@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+from transformers import LogitsProcessorList, TemperatureLogitsWarper, TopPLogitsWarper
 
 from ...binarizer import build_binary_vocab, compute_bit_probs
 from ...config import Config, config as default_config
@@ -92,6 +93,15 @@ class UndetectableWatermark:
             generated_ids  : generated token IDs (for detector bit extraction)
         """
         max_new_tokens = max_new_tokens or self.cfg.max_new_tokens
+        temperature    = self.cfg.temperature
+        top_p          = self.cfg.top_p
+
+        # ---- Prepare logit warpers for distribution alignment ---------- #
+        warpers = LogitsProcessorList()
+        if temperature is not None and temperature != 1.0:
+            warpers.append(TemperatureLogitsWarper(temperature))
+        if top_p is not None and top_p < 1.0:
+            warpers.append(TopPLogitsWarper(top_p))
 
         bit_length, _, _ = build_binary_vocab(tokenizer)
         vocab_size = len(tokenizer)
@@ -129,9 +139,13 @@ class UndetectableWatermark:
                 else:
                     output = model(input_ids, attention_mask=attn_mask)
 
-            probs = torch.nn.functional.softmax(
-                output.logits[:, -1, :vocab_size], dim=-1
-            ).cpu()[0]
+            # ---- logits warping for distribution alignment ------------- #
+            logits = output.logits[:, -1, :vocab_size]
+            if len(warpers) > 0:
+                # Transformers warpers expect [batch_size, vocab_size]
+                logits = warpers(input_ids, logits)
+
+            probs = torch.nn.functional.softmax(logits, dim=-1).cpu()[0]
             past = output.past_key_values
 
             # ---- binary decomposition ---------------------------------- #
