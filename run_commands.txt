@@ -1,6 +1,9 @@
 # Baseline Generation (No Watermarking)
 python -m llm_watermarking.main
 
+# Baseline Evaluation with C4 Dataset
+python -m llm_watermarking.main --dataset c4 --max-tokens 150 --num-samples 10
+
 # Undetectable Watermarking Generation
 # (This will automatically generate a random secret key and save results to outputs/undetectable_results.jsonl)
 python -m llm_watermarking.main --watermark Undetectable
@@ -9,7 +12,13 @@ python -m llm_watermarking.main --watermark Undetectable
 # (Replace <YOUR_SECRET_KEY> with the actual hex key outputted during the generation step)
 python -m llm_watermarking.main --watermark Undetectable --load-results outputs/undetectable_results.jsonl --detect-only --watermark-key <YOUR_SECRET_KEY>
 
-# Optional helpful arguments:
-# --temperature 0.7         (adjust sampling temperature, default 0.7)
+# Run Evaluation and Generate Quality Metrics (Requires Baseline and Watermarked runs)
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/undetectable_results.jsonl
+
+# Optional helpful arguments for main.py:
+# --temperature 1.0         (adjust sampling temperature, default 1.0)
 # --max-tokens 150          (set max tokens per generation, default 150)
 # --output-dir custom_dir   (change output directory, default outputs/)
+# --dataset c4              (use the c4 dataset for prompts instead of simple defaults)
+# --num-samples 10          (number of samples to pull from the dataset, default 500)
+# --lambda 5.0              (security parameter λ for Undetectable watermarking, default: 5.0)

@@ -32,7 +32,7 @@ class Config:
     #  Generation                                                          #
     # ------------------------------------------------------------------ #
     max_new_tokens: int = 150
-    temperature: float = 0.7
+    temperature: float = 1.0
     top_p: float = 0.95
     do_sample: bool = True
 

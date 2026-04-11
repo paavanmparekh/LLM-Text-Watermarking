@@ -59,8 +59,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.7,
-        help="Sampling temperature (default: 0.7).",
+        default=1.0,
+        help="Sampling temperature (default: 1.0).",
     )
     parser.add_argument(
         "--output-dir",
