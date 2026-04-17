@@ -32,6 +32,7 @@ def evaluate_single_lambda(base_detects, wm_detects, lam):
     acc = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0.0
 
     row = {
+        "Lambda": lam,
         "TPR": round(tpr, 4),
         "FNR": round(fnr, 4),
         "TNR": round(tnr, 4),
@@ -46,9 +47,15 @@ def evaluate_single_lambda(base_detects, wm_detects, lam):
     os.makedirs("outputs", exist_ok=True)
     out_path = "outputs/table1_detectability.csv"
     
-    # Append if file exists so you can build a table of different lambdas
+    # Append if file exists so you can build a table of different lambdas.
+    # We check if the existing file has the same columns (e.g. if we added 'Lambda').
     if os.path.exists(out_path):
-        df.to_csv(out_path, mode='a', header=False, index=False)
+        existing_df = pd.read_csv(out_path)
+        if "Lambda" not in existing_df.columns:
+            # Old schema, overwrite with new one
+            df.to_csv(out_path, index=False)
+        else:
+            df.to_csv(out_path, mode='a', header=False, index=False)
     else:
         df.to_csv(out_path, index=False)
         
@@ -56,7 +63,7 @@ def evaluate_single_lambda(base_detects, wm_detects, lam):
     print(df.to_string(index=False))
 
 
-def generate_table_2_csv(base_results, wm_results):
+def generate_table_2_csv(base_results, wm_results, out_path="outputs/table2_quality_metrics.csv"):
     rows = []
     
     base_ppls = []
@@ -72,16 +79,8 @@ def generate_table_2_csv(base_results, wm_results):
         w_eval = w_res.get("eval", {})
         b_eval = b_res.get("eval", {})
         
-        # average empirical entropy
-        if "avg_empirical_entropy" in w_eval:
-            avg_emp_ent = w_eval["avg_empirical_entropy"]
-        else:
-            surprisals = w_res.get("token_surprisals", [])
-            avg_emp_ent = sum(surprisals)/len(surprisals) if surprisals else 0.0
-            
         b_ppl = b_eval.get("perplexity", 0.0)
         w_ppl = w_eval.get("perplexity", 0.0)
-        
         b_div = b_eval.get("log_diversity", 0.0)
         w_div = w_eval.get("log_diversity", 0.0)
         
@@ -94,9 +93,10 @@ def generate_table_2_csv(base_results, wm_results):
             "Prompt": prompt,
             "No Watermarked Response": nw_text,
             "Watermarked Response": w_text,
-            "Avg Empirical Entropy (Watermarked text)": round(avg_emp_ent, 4) if avg_emp_ent else "",
             "PPL (No Watermarked)": round(b_ppl, 2) if b_ppl else "",
-            "PPL (Watermarked)": round(w_ppl, 2) if w_ppl else ""
+            "PPL (Watermarked)": round(w_ppl, 2) if w_ppl else "",
+            "Log Div (No Watermarked)": round(b_div, 3) if b_div else "",
+            "Log Div (Watermarked)": round(w_div, 3) if w_div else ""
         })
 
     # Deltas
@@ -112,13 +112,13 @@ def generate_table_2_csv(base_results, wm_results):
         "Prompt": "--- DELTAS ---",
         "No Watermarked Response": "",
         "Watermarked Response": "",
-        "Avg Empirical Entropy (Watermarked text)": "",
         "PPL (No Watermarked)": f"Delta PPL: {delta_ppl:.3f}",
-        "PPL (Watermarked)": f"Delta Diversity: {delta_div:.3f}"
+        "PPL (Watermarked)": "",
+        "Log Div (No Watermarked)": f"Delta Div: {delta_div:.3f}",
+        "Log Div (Watermarked)": ""
     })
 
     df = pd.DataFrame(rows)
-    out_path = "outputs/table2_quality_metrics.csv"
     df.to_csv(out_path, index=False)
         
     print(f"Table 2 (Quality metrics) saved to -> {out_path}")
@@ -167,7 +167,10 @@ def main():
 
     print("\n" + "="*80)
     evaluate_single_lambda(base_detects, wm_detects, lam)
-    generate_table_2_csv(base_results, wm_results)
+    
+    # Generate a lambda-specific name for Table 2
+    table2_path = f"outputs/table2_quality_metrics_lam{lam}.csv"
+    generate_table_2_csv(base_results, wm_results, out_path=table2_path)
     print("="*80 + "\n")
 
 

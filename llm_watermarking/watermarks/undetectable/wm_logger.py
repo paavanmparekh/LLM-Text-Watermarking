@@ -27,19 +27,24 @@ logger.setLevel(logging.DEBUG)
 
 # Avoid adding duplicate handlers if module is re-imported
 if not logger.handlers:
-    # --- file handler (DEBUG and above → everything) ---
-    _fh = logging.FileHandler(_LOG_FILE, encoding="utf-8")
-    _fh.setLevel(logging.DEBUG)
-    _fh.setFormatter(logging.Formatter(
-        fmt="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S",
-    ))
-    logger.addHandler(_fh)
+    # Logging is currently disabled by user request.
+    # To re-enable, uncomment the handlers below.
+    logger.addHandler(logging.NullHandler())
+    pass
 
-    # --- console handler (INFO and above → important milestones only) ---
-    _ch = logging.StreamHandler()
-    _ch.setLevel(logging.INFO)
-    _ch.setFormatter(logging.Formatter(fmt="  %(message)s"))
-    logger.addHandler(_ch)
+    # --- file handler (DEBUG and above -> everything) ---
+    # _fh = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+    # _fh.setLevel(logging.DEBUG)
+    # _fh.setFormatter(logging.Formatter(
+    #     fmt="%(asctime)s [%(levelname)s] %(message)s",
+    #     datefmt="%H:%M:%S",
+    # ))
+    # logger.addHandler(_fh)
 
-logger.info(f"Log file: {_LOG_FILE}")
+    # --- console handler (INFO and above -> important milestones only) ---
+    # _ch = logging.StreamHandler()
+    # _ch.setLevel(logging.INFO)
+    # _ch.setFormatter(logging.Formatter(fmt="  %(message)s"))
+    # logger.addHandler(_ch)
+
+# logger.info(f"Log file: {_LOG_FILE}")

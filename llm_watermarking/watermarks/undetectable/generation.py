@@ -88,6 +88,7 @@ class UndetectableWatermark:
         dict with all standard generation keys plus:
             key_hex        : hex-encoded secret key
             lambda_entropy : λ value used
+            bit_length     : bit length used
             phase1_tokens  : number of tokens in burn-in phase
             all_tokens     : generated token strings (for detector anchor search)
             generated_ids  : generated token IDs (for detector bit extraction)
@@ -105,8 +106,8 @@ class UndetectableWatermark:
 
         bit_length, _, _ = build_binary_vocab(tokenizer)
         vocab_size = len(tokenizer)
-        print(f"  [Undetectable] bit_length={bit_length}, vocab_size={vocab_size}, λ={self.lambda_entropy}")
-        logger.info(f"=== GENERATE | bit_length={bit_length}, vocab_size={vocab_size}, λ={self.lambda_entropy}, max_new_tokens={max_new_tokens} ===")
+        print(f"  [Undetectable] bit_length={bit_length}, vocab_size={vocab_size}, lambda={self.lambda_entropy}")
+        logger.info(f"=== GENERATE | bit_length={bit_length}, vocab_size={vocab_size}, lambda={self.lambda_entropy}, max_new_tokens={max_new_tokens} ===")
 
         # ---- tokenise prompt ------------------------------------------- #
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
@@ -201,9 +202,9 @@ class UndetectableWatermark:
                 H += surprisal
                 if H >= self.lambda_entropy and r is None:
                     r = tuple(tokenizer.convert_ids_to_tokens(generated_ids))
-                    print(f"  [Undetectable] Phase 1→2 at token {step+1}, H={H:.2f} bits")
+                    print(f"  [Undetectable] Phase 1->2 at token {step+1}, H={H:.2f} bits")
                     logger.info(
-                        f"  Phase 1→2 transition at step={step} (token {step+1}), "
+                        f"  Phase 1->2 transition at step={step} (token {step+1}), "
                         f"H={H:.4f} bits | anchor r has {len(r)} tokens: {r}"
                     )
 
@@ -242,11 +243,10 @@ class UndetectableWatermark:
             "token_surprisals":             token_surprisals,
             "total_empirical_entropy":      total_empirical,
             "total_shannon_entropy":        sum(shannon_entropies),
-            "top_k_distributions":          [],
             "mode":                         self.NAME,
             "bit_length":                   bit_length,
-            # ── watermark-specific ──
+            # key_hex and lambda_entropy are kept: required by evaluate_experiment.py
+            # and evaluate_robustness.py to reconstruct the detector at evaluation time.
             "key_hex":                      self.key.hex(),
             "lambda_entropy":               self.lambda_entropy,
-            "phase1_tokens":                phase1_count,
         }

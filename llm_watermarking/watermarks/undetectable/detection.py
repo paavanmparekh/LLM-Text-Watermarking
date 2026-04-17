@@ -60,7 +60,7 @@ class WatermarkDetector:
         bit_length: Optional[int] = result.get("bit_length")
         N = len(all_tokens)
 
-        logger.info(f"  Tokens={N}, bit_length={bit_length}, λ={self.lam}")
+        logger.info(f"  Tokens={N}, bit_length={bit_length}, lambda={self.lam}")
         logger.debug(f"  Token IDs (first 20): {gen_ids[:20]}")
         logger.debug(f"  Tokens   (first 20): {all_tokens[:20]}")
 

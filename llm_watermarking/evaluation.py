@@ -4,7 +4,10 @@ evaluation.py — Evaluation metrics for generated text.
 Metrics
 -------
 * Perplexity       — model-based, self-evaluated
-* Distinct-N       — lexical diversity (n-gram overlap)
+* Distinct-N       — lexical diversity (n-gram overlap); stored but not in
+                     the pipeline summary CSV
+* Log Diversity    — Herdan's C: log(unique types) / log(total tokens),
+                     the displayed diversity metric in the summary
 * Shannon entropy  — expectation over distribution (bits)
 * Empirical entropy — average surprisal of sampled tokens (bits)
 
@@ -14,7 +17,7 @@ Usage
 
     evaluator = Evaluator(model, tokenizer)
     result = evaluator.evaluate(generation_data)
-    # result["eval"]["perplexity"], result["eval"]["distinct_2"], ...
+    # result["eval"]["perplexity"], result["eval"]["log_diversity"], ...
 """
 
 import math
@@ -60,16 +63,21 @@ class Evaluator:
 
     def log_diversity(self, text: str) -> float:
         """
-        Log Diversity: log(unique unigrams) / total tokens.
+        Log Diversity (Herdan's C): log(unique types) / log(total tokens).
+
+        This is the standard log-type-token ratio, bounded in [0, 1] and
+        more robust to text length than the raw log(unique)/N variant.
+        Returns 0.0 for texts shorter than 2 tokens.
         """
         tokens = self.tokenizer.tokenize(text)
-        if len(tokens) == 0:
+        n = len(tokens)
+        if n < 2:
             return 0.0
         unique = len(set(tokens))
-        if unique == 0:
+        if unique < 2:
             return 0.0
-            
-        return math.log(unique) / len(tokens)
+
+        return math.log(unique) / math.log(n)
 
     # ------------------------------------------------------------------
     # Perplexity
@@ -109,7 +117,7 @@ class Evaluator:
         Returns
         -------
         The same dict with an added ``"eval"`` key containing:
-            distinct_1, distinct_2, distinct_3,
+            log_diversity (Herdan's C),
             perplexity,
             avg_shannon_entropy, avg_empirical_entropy,
             total_shannon_entropy, total_empirical_entropy
@@ -122,9 +130,6 @@ class Evaluator:
             return sum(lst) / len(lst) if lst else 0.0
 
         generation_data["eval"] = {
-            "distinct_1":             self.distinct_n(text, 1),
-            "distinct_2":             self.distinct_n(text, 2),
-            "distinct_3":             self.distinct_n(text, 3),
             "log_diversity":          self.log_diversity(text),
             "perplexity":             self.compute_perplexity(text),
             "avg_shannon_entropy":    _safe_mean(shannon),

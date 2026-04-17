@@ -84,13 +84,13 @@ def run_pipeline(
     # ------------------------------------------------------------------ #
     _save_results(results, cfg.results_path)
     print(f"\n--- PIPELINE COMPLETE ---")
-    print(f"Results saved → {cfg.results_path}")
+    print(f"Results saved -> {cfg.results_path}")
 
     df = _build_summary_df(results)
     
     csv_path = cfg.results_path.replace(".jsonl", ".csv")
     df.to_csv(csv_path, index=False)
-    print(f"Summary saved → {csv_path}")
+    print(f"Summary saved -> {csv_path}")
     
     return results, df
 
@@ -128,18 +128,16 @@ def _build_summary_df(results: List[dict]) -> pd.DataFrame:
         
         row = {
             "Prompt #":              i + 1,
-            "Prompt Preview":        r["prompt"].replace("[INST]", "").replace("[/INST]", "").strip()[:45] + "…",
+            "Prompt Preview":        r["prompt"].replace("[INST]", "").replace("[/INST]", "").strip()[:45] + "...",
             "Tokens":                r["num_tokens"],
             "Gen Time (s)":          r.get("generation_time", float("nan")),
             "Perplexity":            round(ev.get("perplexity", float("nan")), 2),
-            "Dist-1":                round(ev.get("distinct_1", 0.0), 3),
-            "Dist-2":                round(ev.get("distinct_2", 0.0), 3),
+            "Log Diversity":         round(ev.get("log_diversity", 0.0), 4),
             "Avg Shannon (bits)":    round(ev.get("avg_shannon_entropy", 0.0), 3),
             "Avg Empirical (bits)":  round(ev.get("avg_empirical_entropy", 0.0), 3),
         }
         
         if det:
-            row["Phase-1"] = r.get("phase1_tokens", 0)
             row["Phase-2"] = det.get("num_bits", 0)
             row["Detection Score"] = round(det.get("detection_score", 0.0), 2)
             row["Watermarked"] = "Yes" if det.get("detected") else "No"

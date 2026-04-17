@@ -106,6 +106,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="If --load-results is used, run watermark detection on the loaded sequence.",
     )
+    parser.add_argument(
+        "--suffix",
+        type=str,
+        default="",
+        help="Optional suffix for the results filename (e.g. '_lam5.0').",
+    )
     return parser.parse_args()
 
 
@@ -119,13 +125,14 @@ def main() -> None:
         watermark=args.watermark,
         watermark_key=args.watermark_key,
         lambda_entropy=args.lambda_entropy,
+        results_suffix=args.suffix,
     )
 
     # ------------------------------------------------------------------ #
     #  (Re)-load and (Re)-detect                                          #
     # ------------------------------------------------------------------ #
     if args.load_results:
-        print(f"Loading results from {args.load_results} …")
+        print(f"Loading results from {args.load_results} ...")
         results = load_results(args.load_results)
         
         if args.detect_only:
@@ -164,7 +171,7 @@ def main() -> None:
 
         # Regular reload (just plot everything)
         if not args.no_plots:
-            plot_evaluation_metrics(results, output_dir=args.output_dir)
+            plot_evaluation_metrics(results, output_dir=args.output_dir, suffix=args.suffix)
         return
 
     # ------------------------------------------------------------------ #
@@ -179,7 +186,7 @@ def main() -> None:
             key=key_bytes, 
             lambda_entropy=cfg.lambda_entropy
         )
-        print(f"Watermarking scheme: {args.watermark} → {watermark_scheme.NAME} (λ={watermark_scheme.lambda_entropy})")
+        print(f"Watermarking scheme: {args.watermark} -> {watermark_scheme.NAME} (lambda={watermark_scheme.lambda_entropy})")
         print(f"Using Secret Key: {watermark_scheme.key.hex()}")
     else:
         print("Mode: baseline (no watermark)")
@@ -210,7 +217,7 @@ def main() -> None:
     if not args.no_plots:
         # We don't have true negatives here to compute real F1 metrics in one go,
         # but plot_evaluation_metrics will plot the scores/scatter/dist.
-        plot_evaluation_metrics(results, output_dir=args.output_dir)
+        plot_evaluation_metrics(results, output_dir=args.output_dir, suffix=args.suffix)
 
 
 if __name__ == "__main__":

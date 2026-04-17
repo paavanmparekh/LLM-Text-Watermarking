@@ -24,7 +24,7 @@ Usage
 
 import math
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 from transformers import LogitsProcessor, LogitsProcessorList, TemperatureLogitsWarper, TopPLogitsWarper
@@ -62,8 +62,6 @@ class BaselineLogitTracker(LogitsProcessor):
         self.token_surprisals: List[float] = []
         self.total_empirical: float = 0.0
         self._last_log_probs: Optional[torch.Tensor] = None
-        # top-k: list of lists, one per step → [(token_id, prob), ...]
-        self.top_k_distributions: List[List[Tuple[int, float]]] = []
 
     # LogitsProcessor protocol ---------------------------------------- #
 
@@ -91,13 +89,7 @@ class BaselineLogitTracker(LogitsProcessor):
         shannon_h = -(probs * log_probs_b2).sum(dim=-1)
         self.shannon_entropies.append(shannon_h.item())
 
-        # --- 3. Top-k token probabilities for this step ----------------- #
-        top_probs, top_ids = torch.topk(probs[0], k=5)
-        self.top_k_distributions.append(
-            [(int(tid), float(p)) for tid, p in zip(top_ids, top_probs)]
-        )
-
-        # Save for next step (using warped log probs)
+        # --- 3. Save for next step (using warped log probs) -------------- #
         self._last_log_probs = log_probs_b2.detach()
 
         return scores  # pass through — we never modify logits here
@@ -204,5 +196,4 @@ class LLMGenerator:
             "token_surprisals":             tracker.token_surprisals,
             "total_empirical_entropy":      tracker.total_empirical,
             "total_shannon_entropy":        sum(tracker.shannon_entropies[:n]),
-            "top_k_distributions":          tracker.top_k_distributions[:n],
         }

@@ -52,12 +52,15 @@ class Config:
     lambda_entropy: float = 10.0
     """Security parameter λ for Undetectable watermarking (bits)."""
 
+    results_suffix: str = ""
+    """Optional suffix for the results filename (e.g. '_lam5.0')."""
+
     @property
     def results_file(self) -> str:
         """JSONL filename derived from the active watermarking scheme."""
         if self.watermark:
-            return f"{self.watermark.lower()}_results.jsonl"
-        return "baseline_results.jsonl"
+            return f"{self.watermark.lower()}_results{self.results_suffix}.jsonl"
+        return f"baseline_results{self.results_suffix}.jsonl"
 
     @property
     def results_path(self) -> str:

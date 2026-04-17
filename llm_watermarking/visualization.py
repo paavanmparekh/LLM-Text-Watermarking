@@ -16,6 +16,7 @@ from typing import List, Optional
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
+import pandas as pd
 import seaborn as sns
 
 
@@ -28,120 +29,82 @@ def _save_or_show(fig: plt.Figure, filename: str, output_dir: Optional[str]) -> 
         os.makedirs(output_dir, exist_ok=True)
         path = os.path.join(output_dir, filename)
         fig.savefig(path, bbox_inches="tight", dpi=150)
-        print(f"Saved → {path}")
+        print(f"Saved -> {path}")
         plt.close(fig)
     else:
         plt.show()
 
 
-def _prompt_label(result: dict, idx: int, max_chars: int = 30) -> str:
-    raw = result["prompt"].replace("[INST]", "").replace("[/INST]", "").strip()
-    return f"P{idx+1}" if len(raw) > max_chars else f"P{idx+1}"
-
-
 # ------------------------------------------------------------------ #
-#  2. Entropy Distributions (Box Plots)                               #
+#  2. Entropy vs Detection                                            #
 # ------------------------------------------------------------------ #
 
-def plot_entropy_distributions(
+def plot_detection_vs_entropy(
     results: List[dict],
     output_dir: Optional[str] = None,
+    filename: str = "entropy_vs_detection.png"
 ) -> None:
-    """Side-by-side box plots of per-token surprisal for each prompt."""
+    """Box plot + Jitter: Average Empirical Entropy vs Detection Status."""
     sns.set_theme(style="whitegrid")
-    labels = [_prompt_label(r, i) for i, r in enumerate(results)]
-    data   = [r["token_surprisals"] for r in results]
+    
+    data = []
+    for r in results:
+        ev = r.get("eval", {})
+        entropy = ev.get("avg_empirical_entropy")
+        det = r.get("detection", {})
+        
+        if not det:
+            status = "N/A (Baseline)"
+        else:
+            status = "Yes" if det.get("detected") else "No"
+            
+        if entropy is not None:
+            data.append({"Entropy": entropy, "Detected": status})
 
-    fig, ax = plt.subplots(figsize=(max(8, 2 * len(results)), 5))
-    ax.boxplot(
-        data,
-        labels=labels,
-        patch_artist=True,
-        boxprops=dict(facecolor="lightblue", color="navy"),
-        medianprops=dict(color="red", linewidth=2),
-        flierprops=dict(marker="o", markerfacecolor="gray", markersize=3, alpha=0.5),
+    if not data:
+        print("No data available for Detection vs Entropy plot.")
+        return
+
+    df = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Ensure order if both exist
+    order = ["No", "Yes"] if "Yes" in df["Detected"].values and "No" in df["Detected"].values else None
+    if order is None and "N/A (Baseline)" in df["Detected"].values:
+        order = ["N/A (Baseline)"]
+
+    sns.boxplot(
+        data=df, x="Detected", y="Entropy", ax=ax,
+        palette="husl", showfliers=False, order=order
     )
-    ax.set_title("Distribution of Empirical Entropy per Prompt", fontsize=13, fontweight="bold")
-    ax.set_xlabel("Prompt")
-    ax.set_ylabel("Empirical Entropy (bits/token)")
-    plt.xticks(rotation=20, ha="right")
-    plt.tight_layout()
-    _save_or_show(fig, "entropy_distributions.png", output_dir)
-
-
-# ------------------------------------------------------------------ #
-#  3. Aggregate Totals (Bar Chart)                                    #
-# ------------------------------------------------------------------ #
-
-def plot_entropy_aggregate(
-    results: List[dict],
-    output_dir: Optional[str] = None,
-) -> None:
-    """Grouped bar chart: total Shannon vs total empirical entropy per prompt."""
-    sns.set_theme(style="whitegrid")
-    labels     = [f"P{i+1}" for i in range(len(results))]
-    total_emp  = [r["eval"]["total_empirical_entropy"] for r in results]
-    total_shan = [r["eval"]["total_shannon_entropy"]   for r in results]
-    x, w       = np.arange(len(labels)), 0.35
-
-    fig, ax = plt.subplots(figsize=(max(8, 2 * len(results)), 5))
-    ax.bar(x - w / 2, total_emp,  w, label="Total Empirical Entropy", color="darkorange")
-    ax.bar(x + w / 2, total_shan, w, label="Total Shannon Entropy",   color="steelblue")
-    ax.set_title("Total Empirical vs Total Shannon Entropy per Prompt", fontsize=13, fontweight="bold")
-    ax.set_xlabel("Prompt")
-    ax.set_ylabel("Total Entropy (bits)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.legend()
-    plt.tight_layout()
-    _save_or_show(fig, "entropy_aggregate.png", output_dir)
-
-
-# ------------------------------------------------------------------ #
-#  4. Heatmap                                                         #
-# ------------------------------------------------------------------ #
-
-def plot_heatmap(
-    results: List[dict],
-    output_dir: Optional[str] = None,
-) -> None:
-    """Heatmap: rows=prompts, cols=token steps. Colour=empirical entropy."""
-    sns.set_theme(style="white")
-    min_len = min(len(r["token_surprisals"]) for r in results)
-    matrix  = np.array([r["token_surprisals"][:min_len] for r in results])
-    labels  = [f"P{i+1}" for i in range(len(results))]
-
-    fig, ax = plt.subplots(figsize=(16, max(3, len(results))))
-    sns.heatmap(
-        matrix,
-        ax=ax,
-        cmap="YlOrRd",
-        xticklabels=10,
-        yticklabels=labels,
-        cbar_kws={"label": "Empirical Entropy (bits/token)"},
+    sns.stripplot(
+        data=df, x="Detected", y="Entropy", ax=ax,
+        color=".3", alpha=0.5, jitter=True, order=order
     )
-    ax.set_title("Per-Token Empirical Entropy Heatmap", fontsize=13, fontweight="bold")
-    ax.set_xlabel("Token Step")
-    ax.set_ylabel("Prompt")
+
+    ax.set_title("Avg Empirical Entropy vs Watermark Detection", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Watermark Detected")
+    ax.set_ylabel("Average Empirical Entropy (bits/token)")
+
     plt.tight_layout()
-    _save_or_show(fig, "entropy_heatmap.png", output_dir)
+    _save_or_show(fig, filename, output_dir)
 
 
 
 def plot_evaluation_metrics(
     results: List[dict],
     output_dir: Optional[str] = None,
+    suffix: str = ""
 ) -> None:
     """
-    Run all entropy plots.
+    Run the Entropy vs Detection plot.
 
     Parameters
     ----------
     results : list of dicts from pipeline.run_pipeline().
     output_dir : str, optional
+    suffix : str, optional
+        Suffix for the filename (e.g. '_lam5.0')
     """
-    # plot_entropy_trajectories intentionally removed
-
-    plot_entropy_distributions(results, output_dir)
-    plot_entropy_aggregate(results, output_dir)
-    plot_heatmap(results, output_dir)
+    filename = f"entropy_vs_detection{suffix}.png"
+    plot_detection_vs_entropy(results, output_dir, filename=filename)

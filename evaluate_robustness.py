@@ -17,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate Watermark Robustness")
     parser.add_argument("--results", type=str, default="outputs/undetectable_results.jsonl")
     parser.add_argument("--output", type=str, default="outputs/robustness_results.csv")
-    parser.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.05, 0.1, 0.2])
+    parser.add_argument("--noise-levels", type=float, nargs="+", default=[0.0, 0.01, 0.02, 0.05, 0.1, 0.2])
     args = parser.parse_args()
 
     if not os.path.exists(args.results):
@@ -84,10 +84,7 @@ def main():
             summary_data.append({
                 "noise_level": p,
                 "sample_idx": i,
-                "original_ppl": res.get("eval", {}).get("perplexity"),
-                "score": score,
                 "detected": is_detected,
-                "num_bits": det.get("num_bits", 0)
             })
 
     # Save to CSV
@@ -98,8 +95,7 @@ def main():
     # Print high-level summary
     summary = df.groupby("noise_level").agg({
         "detected": "mean",
-        "score": "mean"
-    }).rename(columns={"detected": "TPR", "score": "Avg Score"})
+    }).rename(columns={"detected": "TPR"})
     print("\nSummary Table:")
     print(summary)
 
