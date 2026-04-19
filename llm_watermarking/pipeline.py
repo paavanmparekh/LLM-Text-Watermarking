@@ -9,7 +9,6 @@ from .config import Config, config as default_config
 from .evaluation import Evaluator
 from .generation import LLMGenerator
 from .prompts import PromptLoader
-from .watermarks.undetectable import WatermarkDetector
 
 
 def run_pipeline(
@@ -44,14 +43,6 @@ def run_pipeline(
 
     generator = LLMGenerator(model, tokenizer, cfg)
     evaluator = Evaluator(model, tokenizer)
-    
-    detector = None
-    if watermark_scheme is not None and hasattr(watermark_scheme, "key"):
-        detector = WatermarkDetector(
-            key=watermark_scheme.key,
-            lambda_entropy=watermark_scheme.lambda_entropy,
-            tokenizer=tokenizer
-        )
 
     results: List[dict] = []
     prompts = prompt_loader.get_prompts()
@@ -72,10 +63,6 @@ def run_pipeline(
         gen_data["mode"] = mode_label
         eval_data = evaluator.evaluate(gen_data)
         
-        if detector and use_binary:
-            det = detector.detect(eval_data)
-            print(f"  [Detect] stat={det['stat']:.2f} | threshold={det['threshold']:.2f} | detected={det['detected']}")
-            
         results.append(eval_data)
         print(f"  Done in {gen_data['generation_time']}s | {gen_data['num_tokens']} tokens")
 
@@ -141,7 +128,7 @@ def _build_summary_df(results: List[dict]) -> pd.DataFrame:
             row["Phase-2"] = det.get("num_bits", 0)
             row["Detection Score"] = round(det.get("detection_score", 0.0), 2)
             row["Watermarked"] = "Yes" if det.get("detected") else "No"
-            
+
         rows.append(row)
         
     return pd.DataFrame(rows)

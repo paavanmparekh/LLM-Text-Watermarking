@@ -2,9 +2,9 @@
 # This script runs the baseline generation ONCE and then loops through
 # multiple lambda values to compare their performance.
 
-$lambdas = @(2.0, 5.0, 8.0, 10.0)
+$lambdas = @(4.0, 5.0, 6.0, 7.0, 8.0)  # Lambda values to test
 $max_tokens = 150
-$num_samples = 50
+$num_samples = 10
 
 # Ensure logs and outputs exist
 if (!(Test-Path "outputs")) { New-Item -ItemType Directory -Path "outputs" }
@@ -13,7 +13,7 @@ if (!(Test-Path "outputs")) { New-Item -ItemType Directory -Path "outputs" }
 #  1. Baseline Generation (No Watermark) - Run ONCE                  #
 # ------------------------------------------------------------------ #
 Write-Host "--- [1/3] Starting Baseline Generation (Shared) ---" -ForegroundColor Cyan
-python -m llm_watermarking.main --dataset c4 --max-tokens $max_tokens --num-samples $num_samples --output-dir outputs
+# python -m llm_watermarking.main --dataset c4 --max-tokens $max_tokens --num-samples $num_samples --output-dir outputs
 
 # ------------------------------------------------------------------ #
 #  2. EXPERIMENT LOOP: Watermarked Generation + Evaluation           #
@@ -38,9 +38,9 @@ foreach ($lam in $lambdas) {
     # Note: Table 1 appends, Table 2 is unique per lambda
     python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked $wm_results
 
-    # C. Robustness Evaluation
-    Write-Host "`n--- [C] Running Robustness Evaluation ---" -ForegroundColor Cyan
-    python evaluate_robustness.py --results $wm_results --output $robust_out
+    # # C. Robustness Evaluation
+    # Write-Host "`n--- [C] Running Robustness Evaluation ---" -ForegroundColor Cyan
+    # python evaluate_robustness.py --results $wm_results --output $robust_out
 }
 
 Write-Host "`n--- Pipeline Execution Complete! ---" -ForegroundColor Green

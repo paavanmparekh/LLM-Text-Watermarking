@@ -119,22 +119,11 @@ class Evaluator:
         The same dict with an added ``"eval"`` key containing:
             log_diversity (Herdan's C),
             perplexity,
-            avg_shannon_entropy, avg_empirical_entropy,
-            total_shannon_entropy, total_empirical_entropy
         """
         text = generation_data["generated_text"]
-        shannon  = generation_data.get("shannon_entropies", [])
-        surprisals = generation_data.get("token_surprisals", [])
-
-        def _safe_mean(lst: List[float]) -> float:
-            return sum(lst) / len(lst) if lst else 0.0
 
         generation_data["eval"] = {
             "log_diversity":          self.log_diversity(text),
             "perplexity":             self.compute_perplexity(text),
-            "avg_shannon_entropy":    _safe_mean(shannon),
-            "avg_empirical_entropy":  _safe_mean(surprisals),
-            "total_shannon_entropy":  generation_data.get("total_shannon_entropy", 0.0),
-            "total_empirical_entropy": generation_data.get("total_empirical_entropy", 0.0),
         }
         return generation_data

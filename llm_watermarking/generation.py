@@ -1,16 +1,10 @@
 """
-generation.py — Text generation with per-step entropy tracking.
+generation.py — Text generation
 
 Classes
 -------
-BaselineLogitTracker
-    A LogitsProcessor that records Shannon entropy of each token's
-    distribution and the empirical surprisal once the token is sampled.
-
 LLMGenerator
     Wraps a HuggingFace causal LM and provides generate_text().
-    Accepts an optional custom LogitsProcessor hook so future
-    watermarking schemes can be plugged in with zero code changes.
 
 Usage
 -----
@@ -19,15 +13,13 @@ Usage
     generator = LLMGenerator(model, tokenizer)
     result = generator.generate_text(prompt)
     print(result["generated_text"])
-    print(result["total_empirical_entropy"])
 """
 
-import math
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, List
 
 import torch
-from transformers import LogitsProcessor, LogitsProcessorList, TemperatureLogitsWarper, TopPLogitsWarper
+from transformers import LogitsProcessorList, LogitsProcessor, TemperatureLogitsWarper, TopPLogitsWarper
 
 from .config import Config, config as default_config
 
@@ -37,18 +29,6 @@ from .config import Config, config as default_config
 # ============================================================ #
 
 class BaselineLogitTracker(LogitsProcessor):
-    """
-    Intercepts the raw logits at every decoding step to record:
-
-    * shannon_entropies        — H(D_i) in bits for each step i
-    * token_surprisals         — -log₂ p(x_i | x_{<i}) after sampling
-    * total_empirical          — final empirical entropy H_e(x)
-
-    The tracker is inserted into HuggingFace's LogitsProcessorList,
-    which is called *before* sampling, so the surprisal for step i is
-    computed at step i+1 (when input_ids already contains x_i).
-    """
-
     def __init__(self, temperature: float = 1.0, top_p: float = 1.0) -> None:
         self.warpers = LogitsProcessorList()
         if temperature is not None and temperature != 1.0:
@@ -58,41 +38,23 @@ class BaselineLogitTracker(LogitsProcessor):
         self.reset()
 
     def reset(self) -> None:
-        self.shannon_entropies: List[float] = []
-        self.token_surprisals: List[float] = []
         self.total_empirical: float = 0.0
         self._last_log_probs: Optional[torch.Tensor] = None
-
-    # LogitsProcessor protocol ---------------------------------------- #
 
     def __call__(
         self,
         input_ids: torch.LongTensor,
         scores: torch.FloatTensor,
     ) -> torch.FloatTensor:
-
-        # --- 1. Empirical contribution from the PREVIOUS step ---------- #
         if self._last_log_probs is not None:
             sampled_token = input_ids[0, -1]
             surprisal = -self._last_log_probs[0, sampled_token].item()
-
-            self.token_surprisals.append(surprisal)
             self.total_empirical += surprisal
 
-        # Apply temperature and top_p to a CLONE of the scores
         warped_scores = self.warpers(input_ids, scores.clone())
-
-        # --- 2. Shannon entropy of the CURRENT distribution ------------ #
         probs = torch.nn.functional.softmax(warped_scores, dim=-1)
-        # Use log2 and clamp to handle zeros from top_p
-        log_probs_b2 = torch.log2(torch.clamp(probs, min=1e-10))
-        shannon_h = -(probs * log_probs_b2).sum(dim=-1)
-        self.shannon_entropies.append(shannon_h.item())
-
-        # --- 3. Save for next step (using warped log probs) -------------- #
-        self._last_log_probs = log_probs_b2.detach()
-
-        return scores  # pass through — we never modify logits here
+        self._last_log_probs = torch.log(torch.clamp(probs, min=1e-10)).detach()
+        return scores
 
 
 # ============================================================ #
@@ -101,11 +63,7 @@ class BaselineLogitTracker(LogitsProcessor):
 
 class LLMGenerator:
     """
-    Wrapper around a HuggingFace causal LM for watermarking research.
-
-    Tracks per-token entropy / surprisal via BaselineLogitTracker and
-    allows callers to inject additional LogitsProcessor objects (e.g.
-    a watermarking processor) through the *custom_processor* argument.
+    Wrapper around a HuggingFace causal LM for standard text generation.
 
     Parameters
     ----------
@@ -144,14 +102,11 @@ class LLMGenerator:
             Override config default.
         custom_processor : LogitsProcessor, optional
             An additional processor injected *after* the tracker.
-            Use this to plug in watermarking schemes.
 
         Returns
         -------
         dict with keys:
-            prompt, generated_text, num_tokens,
-            shannon_entropies, token_surprisals,
-            total_empirical_entropy, total_shannon_entropy
+            prompt, generated_text, num_tokens, generation_time, total_empirical_entropy
         """
         max_new_tokens = max_new_tokens or self.cfg.max_new_tokens
         temperature    = temperature    or self.cfg.temperature
@@ -164,6 +119,7 @@ class LLMGenerator:
             top_p=top_p if top_p is not None else 1.0
         )
         processors = LogitsProcessorList([tracker])
+        
         if custom_processor:
             processors.append(custom_processor)
 
@@ -182,18 +138,16 @@ class LLMGenerator:
 
         input_length  = inputs.input_ids.shape[1]
         generated_ids = outputs[0][input_length:]
-        generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
-
-        # Align: surprisals are 1 step behind shannon_entropies
-        n = len(tracker.token_surprisals)
+        generated_text = self.tokenizer.decode(
+            generated_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
 
         return {
             "prompt":                       prompt,
             "generated_text":               generated_text,
-            "num_tokens":                   n,
+            "num_tokens":                   len(generated_ids),
             "generation_time":              round(generation_time, 2),
-            "shannon_entropies":            tracker.shannon_entropies[:n],
-            "token_surprisals":             tracker.token_surprisals,
             "total_empirical_entropy":      tracker.total_empirical,
-            "total_shannon_entropy":        sum(tracker.shannon_entropies[:n]),
         }

@@ -1,17 +1,15 @@
 import argparse
 import math
 import os
+import json
 
 import pandas as pd
 import numpy as np
 
 from llm_watermarking.pipeline import load_results
 from llm_watermarking.config import Config
-from llm_watermarking.model_loader import load_model_and_tokenizer
+from llm_watermarking.model_loader import only_load_tokenizer
 from llm_watermarking.watermarks.undetectable import WatermarkDetector
-
-
-
 
 
 def evaluate_single_lambda(base_detects, wm_detects, lam):
@@ -47,12 +45,9 @@ def evaluate_single_lambda(base_detects, wm_detects, lam):
     os.makedirs("outputs", exist_ok=True)
     out_path = "outputs/table1_detectability.csv"
     
-    # Append if file exists so you can build a table of different lambdas.
-    # We check if the existing file has the same columns (e.g. if we added 'Lambda').
     if os.path.exists(out_path):
         existing_df = pd.read_csv(out_path)
         if "Lambda" not in existing_df.columns:
-            # Old schema, overwrite with new one
             df.to_csv(out_path, index=False)
         else:
             df.to_csv(out_path, mode='a', header=False, index=False)
@@ -84,10 +79,10 @@ def generate_table_2_csv(base_results, wm_results, out_path="outputs/table2_qual
         b_div = b_eval.get("log_diversity", 0.0)
         w_div = w_eval.get("log_diversity", 0.0)
         
-        base_ppls.append(b_ppl)
-        wm_ppls.append(w_ppl)
-        base_divs.append(b_div)
-        wm_divs.append(w_div)
+        if isinstance(b_ppl, float): base_ppls.append(b_ppl)
+        if isinstance(w_ppl, float): wm_ppls.append(w_ppl)
+        if isinstance(b_div, float): base_divs.append(b_div)
+        if isinstance(w_div, float): wm_divs.append(w_div)
         
         rows.append({
             "Prompt": prompt,
@@ -150,7 +145,7 @@ def main():
 
     # Setup detector
     cfg = Config()
-    _, tokenizer = load_model_and_tokenizer(cfg)
+    tokenizer = only_load_tokenizer(cfg)
     detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
 
     print("\n--- Running detection on Base Responses (unwatermarked) ---")
@@ -158,12 +153,47 @@ def main():
     for res in base_results:
         det = detector.detect(res)
         base_detects.append(det["detected"])
+        res["Watermark_Detected"] = det["detected"]
 
     print("--- Running detection on Watermarked Responses ---")
     wm_detects = []
     for res in wm_results:
         det = detector.detect(res)
         wm_detects.append(det["detected"])
+        res["Watermark_Detected"] = det["detected"]
+        
+    def format_df(results_list, is_wm=False):
+        formatted = []
+        for r in results_list:
+            row = r.copy()
+            # Extract log_diversity and perplexity from eval
+            if "eval" in row:
+                ev = row.pop("eval")
+                if isinstance(ev, dict):
+                    row["log_diversity"] = ev.get("log_diversity", "")
+                    row["perplexity"] = ev.get("perplexity", "")
+            
+            # Remove unwanted columns globally
+            row.pop("mode", None)
+            row.pop("Detection_Score", None)
+            
+            if is_wm:
+                row.pop("bit_surprisals", None)
+                row.pop("key_hex", None)
+                row.pop("lambda_entropy", None)
+            formatted.append(row)
+        return pd.DataFrame(formatted)
+
+    # Overwrite the CSV files with the appended detection features
+    csv_wm_path = args.watermarked.replace('.jsonl', '.csv')
+    df_wm = format_df(wm_results, is_wm=True)
+    df_wm.to_csv(csv_wm_path, index=False)
+    print(f"Updated {csv_wm_path} with pristine detection columns!")
+
+    csv_base_path = args.baseline.replace('.jsonl', '.csv')
+    df_base = format_df(base_results, is_wm=False)
+    df_base.to_csv(csv_base_path, index=False)
+    print(f"Updated {csv_base_path} with pristine detection columns!")
 
     print("\n" + "="*80)
     evaluate_single_lambda(base_detects, wm_detects, lam)

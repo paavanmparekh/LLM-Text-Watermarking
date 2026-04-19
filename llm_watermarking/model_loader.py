@@ -70,3 +70,15 @@ def load_model_and_tokenizer(cfg: Config = None):
     model.eval()
     print("Model loaded successfully!")
     return model, tokenizer
+
+def only_load_tokenizer(cfg: Config = None):
+    """
+    Load ONLY the tokenizer specified in *cfg* to save time in evaluation steps.
+    """
+    if cfg is None:
+        cfg = default_config
+
+    print(f"Loading tokenizer for {cfg.model_name} (skipping model) ...")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name)
+    tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer

@@ -31,16 +31,16 @@ def main():
         print("No results found.")
         return
 
-    # Initialize model/tokenizer for detector
+    # Initialize tokenizer for detector
     cfg = Config()
-    _, tokenizer = load_model_and_tokenizer(cfg)
+    from llm_watermarking.model_loader import only_load_tokenizer
+    tokenizer = only_load_tokenizer(cfg)
     
     modifier = TextModifier(seed=42)
     
     # We'll use the key and lambda from the first result (assuming they are consistent)
     key_hex = original_results[0].get("key_hex")
     lam = original_results[0].get("lambda_entropy", 16.0)
-    bit_length = original_results[0].get("bit_length", 16)
     
     if not key_hex:
         print("Error: No key found in results.")
@@ -65,7 +65,6 @@ def main():
             # Prepare result dict for detector
             test_res = {
                 "generated_text": modified_text,
-                "bit_length": bit_length,
                 "prompt": res["prompt"]
             }
             

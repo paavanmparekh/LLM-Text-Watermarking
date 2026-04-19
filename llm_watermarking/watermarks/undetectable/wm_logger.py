@@ -33,18 +33,18 @@ if not logger.handlers:
     pass
 
     # --- file handler (DEBUG and above -> everything) ---
-    # _fh = logging.FileHandler(_LOG_FILE, encoding="utf-8")
-    # _fh.setLevel(logging.DEBUG)
-    # _fh.setFormatter(logging.Formatter(
-    #     fmt="%(asctime)s [%(levelname)s] %(message)s",
-    #     datefmt="%H:%M:%S",
-    # ))
-    # logger.addHandler(_fh)
+    _fh = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+    _fh.setLevel(logging.DEBUG)
+    _fh.setFormatter(logging.Formatter(
+        fmt="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    ))
+    logger.addHandler(_fh)
 
     # --- console handler (INFO and above -> important milestones only) ---
-    # _ch = logging.StreamHandler()
-    # _ch.setLevel(logging.INFO)
-    # _ch.setFormatter(logging.Formatter(fmt="  %(message)s"))
-    # logger.addHandler(_ch)
+    _ch = logging.StreamHandler()
+    _ch.setLevel(logging.INFO)
+    _ch.setFormatter(logging.Formatter(fmt="  %(message)s"))
+    logger.addHandler(_ch)
 
 # logger.info(f"Log file: {_LOG_FILE}")

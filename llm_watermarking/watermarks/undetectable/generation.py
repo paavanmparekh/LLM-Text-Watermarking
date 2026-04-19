@@ -1,11 +1,9 @@
 
 import hashlib
 import hmac
-import json
 import math
-import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 from transformers import LogitsProcessorList, TemperatureLogitsWarper, TopPLogitsWarper
@@ -14,49 +12,13 @@ from ...binarizer import build_binary_vocab, compute_bit_probs
 from ...config import Config, config as default_config
 from .wm_logger import logger
 
-
-# ------------------------------------------------------------------ #
-#  PRF                                                                #
-# ------------------------------------------------------------------ #
-
-def _prf(key: bytes, r: Tuple, global_bit_pos: int) -> float:
-    """
-    Keyed PRF: (key, r, bit_pos) → float in [0, 1].
-
-    Uses HMAC-SHA256. The context r is the tuple of token IDs generated in
-    Phase 1 (frozen once H ≥ λ). global_bit_pos indexes every binary decision
-    across all Phase-2 tokens (not reset per token).
-
-    Why HMAC over random.seed: HMAC is a cryptographically secure PRF —
-    without the key, its outputs are computationally indistinguishable from
-    random, which is the foundation of the undetectability proof.
-    """
-    msg = json.dumps([list(r), global_bit_pos], separators=(',', ':')).encode()
+def _prf_binary(key: bytes, r_bits: str, global_bit_pos: int) -> float:
+    msg = bytes(r_bits, "utf-8") + bytes(bin(global_bit_pos), "utf-8")
     digest = hmac.new(key, msg, hashlib.sha256).digest()
-    # Map full 256 bits to [0, 1]
     return int.from_bytes(digest, "big") / ((1 << 256) - 1)
 
-
-# ------------------------------------------------------------------ #
-#  Watermark scheme                                                   #
-# ------------------------------------------------------------------ #
-
 class UndetectableWatermark:
-    """
-    Undetectable watermarking via binary token decomposition (Christ et al. 2023).
-
-    Parameters
-    ----------
-    cfg : Config
-    key : bytes, optional
-        Secret key. If None, a fresh random 32-byte key is generated.
-    lambda_entropy : float
-        Security parameter λ (bits). Phase-1 runs until H ≥ λ.
-        Default 5 bits — balanced for robust ML testing on short sequences.
-        OrZamir's reference implementation omits Phase 1 entirely (λ=0),
-        trading the formal entropy-seed argument for simplicity.
-    """
-
+    
     NAME = "undetectable"
 
     def __init__(
@@ -66,12 +28,9 @@ class UndetectableWatermark:
         lambda_entropy: float = 5.0,
     ) -> None:
         self.cfg = cfg or default_config
-        # Use fixed key by default for consistency across project runs
         default_key = bytes.fromhex("7ba6c066a1f7784bf688f01556d92f7f45d2b9ec1039b4dfdfc4af07a07974f8")
         self.key = key if key is not None else default_key
         self.lambda_entropy = lambda_entropy
-
-    # ------------------------------------------------------------------ #
 
     def generate(
         self,
@@ -80,24 +39,11 @@ class UndetectableWatermark:
         prompt: str,
         max_new_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """
-        Generate watermarked text using Algorithm 3 (Wat_sk).
-
-        Returns
-        -------
-        dict with all standard generation keys plus:
-            key_hex        : hex-encoded secret key
-            lambda_entropy : λ value used
-            bit_length     : bit length used
-            phase1_tokens  : number of tokens in burn-in phase
-            all_tokens     : generated token strings (for detector anchor search)
-            generated_ids  : generated token IDs (for detector bit extraction)
-        """
+        
         max_new_tokens = max_new_tokens or self.cfg.max_new_tokens
         temperature    = self.cfg.temperature
         top_p          = self.cfg.top_p
 
-        # ---- Prepare logit warpers for distribution alignment ---------- #
         warpers = LogitsProcessorList()
         if temperature is not None and temperature != 1.0:
             warpers.append(TemperatureLogitsWarper(temperature))
@@ -106,30 +52,28 @@ class UndetectableWatermark:
 
         bit_length, _, _ = build_binary_vocab(tokenizer)
         vocab_size = len(tokenizer)
-        print(f"  [Undetectable] bit_length={bit_length}, vocab_size={vocab_size}, lambda={self.lambda_entropy}")
-        logger.info(f"=== GENERATE | bit_length={bit_length}, vocab_size={vocab_size}, lambda={self.lambda_entropy}, max_new_tokens={max_new_tokens} ===")
+        special_token_ids = sorted({
+            tid for tid in getattr(tokenizer, "all_special_ids", [])
+            if tid is not None and 0 <= tid < vocab_size
+        })
 
-        # ---- tokenise prompt ------------------------------------------- #
         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         input_ids = inputs["input_ids"]
         attn_mask = torch.ones_like(input_ids)
         past: Any = None
 
-        # ---- state ----------------------------------------------------- #
         H: float = 0.0
-        r: Optional[Tuple] = None
+        r: Optional[str] = None
+        bitstring: str = ""
+        anchor_bit_index: Optional[int] = None
+        anchor_entropy_bits: Optional[float] = None
 
-        # ---- metric accumulators --------------------------------------- #
-        shannon_entropies: List[float] = []
-        token_surprisals: List[float] = []
-        total_empirical: float = 0.0
+        bit_surprisals: List[float] = []
         generated_ids: List[int] = []
-        phase1_count: int = 0
 
         t0 = time.time()
 
         for step in range(max_new_tokens):
-            # ---- forward pass ------------------------------------------ #
             with torch.no_grad():
                 if past is not None:
                     output = model(
@@ -140,21 +84,16 @@ class UndetectableWatermark:
                 else:
                     output = model(input_ids, attention_mask=attn_mask)
 
-            # ---- logits warping for distribution alignment ------------- #
             logits = output.logits[:, -1, :vocab_size]
             if len(warpers) > 0:
-                # Transformers warpers expect [batch_size, vocab_size]
                 logits = warpers(input_ids, logits)
+            if special_token_ids:
+                logits[:, special_token_ids] = float("-inf")
 
             probs = torch.nn.functional.softmax(logits, dim=-1).cpu()[0]
             past = output.past_key_values
 
-            # ---- binary decomposition ---------------------------------- #
             token_id = 0
-            token_log_prob = 0.0
-            token_shannon = 0.0
-
-            in_phase1 = (H < self.lambda_entropy)
 
             for bit_idx in range(bit_length):
                 p0, p1 = compute_bit_probs(probs, bit_idx, bit_length, token_id)
@@ -163,90 +102,70 @@ class UndetectableWatermark:
                 if total_mass == 0.0:
                     break
 
+                global_bit_pos = step * bit_length + bit_idx
                 prob_1 = p1.item() / total_mass
                 prob_0 = 1.0 - prob_1
 
-                # Shannon entropy of this bit split
-                h_bit = 0.0
-                if prob_0 > 0.0:
-                    h_bit -= prob_0 * math.log2(prob_0)
-                if prob_1 > 0.0:
-                    h_bit -= prob_1 * math.log2(prob_1)
-                token_shannon += h_bit
-
                 token_id <<= 1
 
-                if in_phase1:
-                    chosen = 1 if torch.rand(1).item() < prob_1 else 0
+                if H < self.lambda_entropy:
+                    chosen = 1 if torch.rand(1).item() <= prob_1 else 0
+                    chosen_prob = prob_1 if chosen == 1 else prob_0
+                    bit_surprisal = -math.log2(chosen_prob)
+                    bit_surprisals.append(bit_surprisal)
+                    H += bit_surprisal
+                    if H >= self.lambda_entropy and r is None:
+                        r = bitstring + str(chosen)
+                        anchor_bit_index = global_bit_pos
+                        anchor_entropy_bits = H
+                        logger.info(f"  ANCHOR FOUND: r='{r}' at pos={global_bit_pos}")
                 else:
-                    prf_val = _prf(self.key, r, step * bit_length + bit_idx)
+                    prf_val = _prf_binary(self.key, r, global_bit_pos)
                     chosen  = 1 if prf_val <= prob_1 else 0
-                # NOTE: no per-bit logging here — O(tokens × bit_length) overhead
+                    chosen_prob = prob_1 if chosen == 1 else prob_0
+                    bit_surprisal = -math.log2(chosen_prob)
+                    bit_surprisals.append(bit_surprisal)
                 
                 token_id += chosen
-                chosen_prob = prob_1 if chosen == 1 else prob_0
-                token_log_prob += math.log2(chosen_prob) if chosen_prob > 0.0 else -1000.0
-            # ---- clamp token_id ---------------------------------------- #
-            token_id = min(max(token_id, 0), vocab_size - 1)
+                bitstring += str(chosen)
 
-            # ---- metrics ----------------------------------------------- #
-            surprisal = -token_log_prob
-            total_empirical += surprisal
-            token_surprisals.append(surprisal)
-            shannon_entropies.append(token_shannon)
+            token_id = min(max(token_id, 0), vocab_size - 1)
             generated_ids.append(token_id)
 
-            # ---- Phase 1 → Phase 2 transition check -------------------- #
-            if in_phase1:
-                phase1_count += 1
-                H += surprisal
-                if H >= self.lambda_entropy and r is None:
-                    r = tuple(tokenizer.convert_ids_to_tokens(generated_ids))
-                    print(f"  [Undetectable] Phase 1->2 at token {step+1}, H={H:.2f} bits")
-                    logger.info(
-                        f"  Phase 1->2 transition at step={step} (token {step+1}), "
-                        f"H={H:.4f} bits | anchor r has {len(r)} tokens: {r}"
-                    )
-
-            # ---- feed token back --------------------------------------- #
             next_token = torch.tensor([[token_id]], device=model.device)
             input_ids = torch.cat([input_ids, next_token], dim=-1)
             attn_mask = torch.cat([attn_mask, attn_mask.new_ones((1, 1))], dim=-1)
 
-            if token_id == tokenizer.eos_token_id:
-                break
-
         generation_time = time.time() - t0
-        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-        n = len(token_surprisals)
-
-        phase2_tokens = n - phase1_count
-        logger.info(
-            f"  Generation done | total_tokens={n}, phase1={phase1_count}, phase2={phase2_tokens}, "
-            f"time={round(time.time()-t0,2)}s | watermarked={'YES' if r is not None else 'NO (no Phase2)'}"
+        generated_text = tokenizer.decode(
+            generated_ids,
+            skip_special_tokens=False,
+            clean_up_tokenization_spaces=False,
         )
-        #logger.info(f"  Generated IDs (first 20): {generated_ids[:20]}")
-        if r is not None:
-            logger.info(f"  Anchor r (all {len(r)} tokens): {r}")
-        else:
+        detector_token_ids = tokenizer.encode(generated_text, add_special_tokens=False)
+        text_roundtrip_match = generated_ids == detector_token_ids
+        if not text_roundtrip_match:
             logger.warning(
-                f"  r=None: H={H:.4f} never reached λ={self.lambda_entropy}. "
-                f"All {n} tokens were Phase-1 (randomly sampled). NO watermark embedded!"
+                "  TEXT ROUNDTRIP MISMATCH: detector tokenization does not exactly match "
+                "the internally sampled token sequence."
             )
 
         return {
             "prompt":                       prompt,
             "generated_text":               generated_text,
-            "num_tokens":                   n,
+            "num_tokens":                   len(generated_ids),
             "generation_time":              round(generation_time, 2),
-            "shannon_entropies":            shannon_entropies,
-            "token_surprisals":             token_surprisals,
-            "total_empirical_entropy":      total_empirical,
-            "total_shannon_entropy":        sum(shannon_entropies),
-            "mode":                         self.NAME,
+            "bit_surprisals":               bit_surprisals,
+            "total_empirical_entropy":      sum(bit_surprisals),
+            "generated_ids":                generated_ids,
+            "watermark_bitstring":          bitstring,
             "bit_length":                   bit_length,
-            # key_hex and lambda_entropy are kept: required by evaluate_experiment.py
-            # and evaluate_robustness.py to reconstruct the detector at evaluation time.
+            "anchor_bit_index":             anchor_bit_index,
+            "anchor_length_bits":           len(r) if r is not None else 0,
+            "anchor_entropy_bits":          anchor_entropy_bits,
+            "text_roundtrip_match":         text_roundtrip_match,
+            "detector_token_count":         len(detector_token_ids),
+            "mode":                         self.NAME,
             "key_hex":                      self.key.hex(),
             "lambda_entropy":               self.lambda_entropy,
         }
