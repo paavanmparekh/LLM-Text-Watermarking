@@ -7,6 +7,7 @@ from tqdm import tqdm
 from llm_watermarking.config import Config
 from llm_watermarking.model_loader import load_model_and_tokenizer
 from llm_watermarking.watermarks.undetectable import WatermarkDetector
+from llm_watermarking.watermarks.prc import PRCWatermarkDetector, LDPCPRC0Params
 from llm_watermarking.robustness import TextModifier
 
 def load_jsonl(path):
@@ -38,15 +39,27 @@ def main():
     
     modifier = TextModifier(seed=42)
     
-    # We'll use the key and lambda from the first result (assuming they are consistent)
+    # We'll use the key and scheme params from the first result (assuming consistency).
     key_hex = original_results[0].get("key_hex")
     lam = original_results[0].get("lambda_entropy", 16.0)
+    prc_p = original_results[0].get("prc_params")
     
     if not key_hex:
         print("Error: No key found in results.")
         return
     
-    detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
+    if isinstance(prc_p, dict):
+        params = LDPCPRC0Params(
+            n=int(prc_p["n"]),
+            g=int(prc_p["g"]),
+            t=int(prc_p["t"]),
+            r=int(prc_p["r"]),
+            eta=float(prc_p["eta"]),
+            zeta=float(prc_p["zeta"]),
+        )
+        detector = PRCWatermarkDetector(bytes.fromhex(key_hex), params, tokenizer=tokenizer, robust_scan=True)
+    else:
+        detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
     
     summary_data = []
 

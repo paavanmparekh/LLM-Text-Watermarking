@@ -10,6 +10,11 @@ from llm_watermarking.pipeline import load_results
 from llm_watermarking.config import Config
 from llm_watermarking.model_loader import only_load_tokenizer
 from llm_watermarking.watermarks.undetectable import WatermarkDetector
+from llm_watermarking.watermarks.prc import PRCWatermarkDetector, LDPCPRC0Params
+from llm_watermarking.visualization import (
+    plot_entropy_vs_detection_from_csvs,
+    plot_total_entropy_vs_detection,
+)
 
 
 def evaluate_single_lambda(base_detects, wm_detects, lam):
@@ -138,6 +143,7 @@ def main():
     # Infer key and lambda
     key_hex = wm_results[0].get("key_hex")
     lam = wm_results[0].get("lambda_entropy", 5.0)
+    prc_p = wm_results[0].get("prc_params")
 
     if not key_hex:
         print("Could not find key_hex in watermarked results. Aborting.")
@@ -146,14 +152,28 @@ def main():
     # Setup detector
     cfg = Config()
     tokenizer = only_load_tokenizer(cfg)
-    detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
+    if isinstance(prc_p, dict):
+        params = LDPCPRC0Params(
+            n=int(prc_p["n"]),
+            g=int(prc_p["g"]),
+            t=int(prc_p["t"]),
+            r=int(prc_p["r"]),
+            eta=float(prc_p["eta"]),
+            zeta=float(prc_p["zeta"]),
+        )
+        detector = PRCWatermarkDetector(bytes.fromhex(key_hex), params, tokenizer=tokenizer)
+        detected_col = "prc_watermark_detected"
+        lam = int(prc_p.get("n", 0))
+    else:
+        detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
+        detected_col = "undetectable_watermark_detected"
 
     print("\n--- Running detection on Base Responses (unwatermarked) ---")
     base_detects = []
     for res in base_results:
         det = detector.detect(res)
         base_detects.append(det["detected"])
-        res["Watermark_Detected"] = det["detected"]
+        res[detected_col] = det["detected"]
 
     print("--- Running detection on Watermarked Responses ---")
     wm_detects = []
@@ -201,6 +221,18 @@ def main():
     # Generate a lambda-specific name for Table 2
     table2_path = f"outputs/table2_quality_metrics_lam{lam}.csv"
     generate_table_2_csv(base_results, wm_results, out_path=table2_path)
+
+    # Per-lambda plots (only for the current run's lambda).
+    plot_entropy_vs_detection_from_csvs(
+        [csv_wm_path],
+        output_dir="outputs",
+        filename=f"entropy_vs_detection_lam{lam}.png",
+    )
+    plot_total_entropy_vs_detection(
+        [csv_wm_path],
+        output_dir="outputs",
+        filename=f"total_entropy_vs_detection_lam{lam}.png",
+    )
     print("="*80 + "\n")
 
 

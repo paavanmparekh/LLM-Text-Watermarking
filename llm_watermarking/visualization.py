@@ -12,6 +12,7 @@ plot_evaluation_metrics     : convenience wrapper (entropy + detection if presen
 
 import os
 from typing import List, Optional
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -51,12 +52,17 @@ def plot_detection_vs_entropy(
     for r in results:
         ev = r.get("eval", {})
         entropy = ev.get("avg_empirical_entropy")
+        if entropy is None:
+            total_entropy = r.get("total_empirical_entropy")
+            token_count = r.get("detector_token_count") or r.get("num_tokens")
+            if total_entropy is not None and token_count:
+                entropy = total_entropy / token_count
         det = r.get("detection", {})
         
-        if not det:
-            status = "N/A (Baseline)"
-        else:
+        if det:
             status = "Yes" if det.get("detected") else "No"
+        else:
+            status = "N/A (Baseline)" if r.get("mode") == "baseline" else "N/A (No Detection)"
             
         if entropy is not None:
             data.append({"Entropy": entropy, "Detected": status})
@@ -70,7 +76,7 @@ def plot_detection_vs_entropy(
     
     # Ensure order if both exist
     order = ["No", "Yes"] if "Yes" in df["Detected"].values and "No" in df["Detected"].values else None
-    if order is None and "N/A (Baseline)" in df["Detected"].values:
+    if order is None and "N/A (Baseline)" in df["Detected"].values and "N/A (No Detection)" not in df["Detected"].values:
         order = ["N/A (Baseline)"]
 
     sns.boxplot(
@@ -94,6 +100,74 @@ def plot_detection_vs_entropy(
 # ------------------------------------------------------------------ #
 #  3. Total Empirical Entropy vs Detection (from CSV)                #
 # ------------------------------------------------------------------ #
+
+def discover_watermarked_csvs(
+    output_dir: str = "outputs",
+    pattern: str = "undetectable_results_lam*.csv",
+) -> List[str]:
+    """Find watermarked result CSVs (typically written by evaluate_experiment.py)."""
+    base = Path(output_dir)
+    return sorted(str(p) for p in base.glob(pattern) if p.is_file())
+
+
+def plot_entropy_vs_detection_from_csvs(
+    csv_paths: List[str],
+    output_dir: Optional[str] = None,
+    filename: str = "entropy_vs_detection.png",
+) -> None:
+    """
+    Box plot + Jitter: Avg empirical entropy (bits/token) vs Detection (from CSV data).
+
+    Required columns:
+      - total_empirical_entropy
+      - Watermark_Detected
+    Token count column (first available):
+      - detector_token_count
+      - num_tokens
+    """
+    sns.set_theme(style="whitegrid")
+
+    data = []
+    for csv_path in csv_paths:
+        df = pd.read_csv(csv_path)
+        if "total_empirical_entropy" not in df.columns or "Watermark_Detected" not in df.columns:
+            print(f"Skipping {csv_path}: Missing required columns.")
+            continue
+
+        token_col = "detector_token_count" if "detector_token_count" in df.columns else ("num_tokens" if "num_tokens" in df.columns else None)
+
+        for _, row in df.iterrows():
+            total_entropy = row.get("total_empirical_entropy")
+            token_count = row.get(token_col) if token_col else None
+            if pd.isna(total_entropy) or token_count in (None, 0) or pd.isna(token_count):
+                continue
+            avg_entropy = float(total_entropy) / float(token_count)
+            detected = "Yes" if bool(row.get("Watermark_Detected")) else "No"
+            data.append({"Entropy": avg_entropy, "Detected": detected})
+
+    if not data:
+        print("No data available for Entropy vs Detection plot.")
+        return
+
+    df_plot = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    order = ["No", "Yes"] if {"Yes", "No"}.issubset(set(df_plot["Detected"].values)) else None
+    sns.boxplot(
+        data=df_plot, x="Detected", y="Entropy", ax=ax,
+        palette={"Yes": "green", "No": "red"}, showfliers=False, order=order
+    )
+    sns.stripplot(
+        data=df_plot, x="Detected", y="Entropy", ax=ax,
+        color=".3", alpha=0.5, jitter=True, order=order
+    )
+
+    ax.set_title("Avg Empirical Entropy vs Watermark Detection", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Watermark Detected")
+    ax.set_ylabel("Average Empirical Entropy (bits/token)")
+
+    plt.tight_layout()
+    _save_or_show(fig, filename, output_dir)
 
 def plot_total_entropy_vs_detection(
     csv_paths: List[str],
@@ -171,3 +245,43 @@ def plot_evaluation_metrics(
     """
     filename = f"entropy_vs_detection{suffix}.png"
     plot_detection_vs_entropy(results, output_dir, filename=filename)
+
+
+def generate_final_plots_from_outputs(output_dir: str = "outputs") -> None:
+    """Generate per-lambda plots by scanning `output_dir` for result CSVs."""
+    csv_paths = discover_watermarked_csvs(output_dir=output_dir)
+    if not csv_paths:
+        print(f"No watermarked CSVs found in {output_dir}.")
+        return
+
+    for csv_path in csv_paths:
+        lam = str(csv_path).split("lam")[-1].split(".csv")[0]
+        plot_entropy_vs_detection_from_csvs(
+            [csv_path],
+            output_dir=output_dir,
+            filename=f"entropy_vs_detection_lam{lam}.png",
+        )
+        plot_total_entropy_vs_detection(
+            [csv_path],
+            output_dir=output_dir,
+            filename=f"total_entropy_vs_detection_lam{lam}.png",
+        )
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate final watermarking plots from outputs/*.csv")
+    parser.add_argument("--output-dir", default="outputs", help="Directory containing result CSVs.")
+    parser.add_argument("--combined", action="store_true", help="Also write combined plots across all lambdas.")
+    args = parser.parse_args()
+
+    generate_final_plots_from_outputs(output_dir=args.output_dir)
+    if args.combined:
+        csv_paths = discover_watermarked_csvs(output_dir=args.output_dir)
+        plot_entropy_vs_detection_from_csvs(csv_paths, output_dir=args.output_dir, filename="entropy_vs_detection.png")
+        plot_total_entropy_vs_detection(csv_paths, output_dir=args.output_dir, filename="total_entropy_vs_detection.png")
+
+
+if __name__ == "__main__":
+    main()

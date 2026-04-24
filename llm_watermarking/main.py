@@ -24,6 +24,7 @@ from .prompts import PromptLoader
 from .visualization import plot_evaluation_metrics
 from .watermarks import WATERMARK_REGISTRY
 from .watermarks.undetectable import WatermarkDetector
+from .watermarks.prc import PRCWatermarkDetector, LDPCPRC0Params
 
 
 def parse_args() -> argparse.Namespace:
@@ -151,13 +152,30 @@ def main() -> None:
                 print("Error: Detection requires a watermark key.")
                 return
                 
-            _, tokenizer = load_model_and_tokenizer(cfg)
-                
-            detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
+            from .model_loader import only_load_tokenizer
+            tokenizer = only_load_tokenizer(cfg)
+
+            # Auto-select detector by result metadata.
+            if results and results[0].get("mode") == "prc":
+                prc_p = results[0].get("prc_params")
+                if not isinstance(prc_p, dict):
+                    print("Error: PRC detection requires 'prc_params' in the results file.")
+                    return
+                params = LDPCPRC0Params(
+                    n=int(prc_p["n"]),
+                    g=int(prc_p["g"]),
+                    t=int(prc_p["t"]),
+                    r=int(prc_p["r"]),
+                    eta=float(prc_p["eta"]),
+                    zeta=float(prc_p["zeta"]),
+                )
+                detector = PRCWatermarkDetector(bytes.fromhex(key_hex), params, tokenizer=tokenizer)
+            else:
+                detector = WatermarkDetector(bytes.fromhex(key_hex), lam, tokenizer=tokenizer)
             
             # Since we're just loading one file, we don't have true labels for
             # mixed metrics, but we can set them all to 1 if it was a watermarked run
-            is_wm = any("undetectable" in r.get("mode", "") for r in results)
+            is_wm = any(r.get("mode") in {"undetectable", "prc"} for r in results)
             true_labels = [1 if is_wm else 0] * len(results)
             
             print(f"Running detection on {len(results)} sequences...")
