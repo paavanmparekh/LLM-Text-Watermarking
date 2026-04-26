@@ -3,7 +3,7 @@ param(
     [string]$Dataset = "c4",
 
     [int]$MaxTokens = 150,
-    [int]$NumSamples = 5,
+    [int]$NumSamples = 10,
     [string]$OutputDir = "outputs"
 )
 
@@ -16,6 +16,7 @@ python -m llm_watermarking.main --dataset $Dataset --max-tokens $MaxTokens --num
 
 if (Test-Path $baseline_path) {
     Write-Host "--- Baseline generation complete: $baseline_path ---" -ForegroundColor Green
-} else {
+}
+else {
     throw "Baseline generation failed: $baseline_path not found. Check the Python logs for errors."
 }

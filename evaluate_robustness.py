@@ -14,6 +14,34 @@ def load_jsonl(path):
     with open(path, "r", encoding="utf-8") as f:
         return [json.loads(line) for line in f]
 
+
+def run_label_from_path(path):
+    name = os.path.splitext(os.path.basename(path))[0]
+    return name.replace("_results", "", 1)
+
+
+def infer_metadata(results, results_path):
+    first = results[0] if results else {}
+    prc_p = first.get("prc_params")
+    run_label = run_label_from_path(results_path)
+
+    if isinstance(prc_p, dict):
+        return {
+            "scheme": "PRC",
+            "run_label": run_label,
+            "parameter": (
+                f"n={int(prc_p['n'])};g={int(prc_p['g'])};t={int(prc_p['t'])};"
+                f"r={int(prc_p['r'])};eta={float(prc_p['eta'])};zeta={float(prc_p['zeta'])}"
+            ),
+        }
+
+    lam = first.get("lambda_entropy", 5.0)
+    return {
+        "scheme": "Undetectable",
+        "run_label": run_label,
+        "parameter": f"lambda={lam}",
+    }
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Watermark Robustness")
     parser.add_argument("--results", type=str, default="outputs/undetectable_results.jsonl")
@@ -43,6 +71,7 @@ def main():
     key_hex = original_results[0].get("key_hex")
     lam = original_results[0].get("lambda_entropy", 16.0)
     prc_p = original_results[0].get("prc_params")
+    metadata = infer_metadata(original_results, args.results)
     
     if not key_hex:
         print("Error: No key found in results.")
@@ -67,7 +96,6 @@ def main():
         print(f"\n--- Testing Noise Level: {p*100:.0f}% ---")
         
         detected_count = 0
-        total_score = 0.0
         
         for i, res in enumerate(original_results):
             # 1. Apply modification (Substitution + Insertion mix)
@@ -89,15 +117,25 @@ def main():
             
             if is_detected:
                 detected_count += 1
-            total_score += score
             
             print(f"  Sample {i+1}: Score={score:.2f} | Detected={is_detected}")
-            
-            summary_data.append({
-                "noise_level": p,
-                "sample_idx": i,
-                "detected": is_detected,
-            })
+
+        total = len(original_results)
+        missed_count = total - detected_count
+        tpr = detected_count / total if total else 0.0
+        fnr = missed_count / total if total else 0.0
+
+        summary_data.append({
+            "Scheme": metadata["scheme"],
+            "RunLabel": metadata["run_label"],
+            "Parameter": metadata["parameter"],
+            "NoiseLevel": p,
+            "TPR": round(tpr, 4),
+            "FNR": round(fnr, 4),
+            "Detected": detected_count,
+            "Missed": missed_count,
+            "Total": total,
+        })
 
     # Save to CSV
     df = pd.DataFrame(summary_data)
@@ -105,11 +143,8 @@ def main():
     print(f"\nRobustness results saved to {args.output}")
     
     # Print high-level summary
-    summary = df.groupby("noise_level").agg({
-        "detected": "mean",
-    }).rename(columns={"detected": "TPR"})
     print("\nSummary Table:")
-    print(summary)
+    print(df.to_string(index=False))
 
 if __name__ == "__main__":
     main()

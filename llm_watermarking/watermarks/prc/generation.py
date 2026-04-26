@@ -10,6 +10,7 @@ from transformers import LogitsProcessorList, TemperatureLogitsWarper, TopPLogit
 from ...binarizer import build_binary_vocab, compute_bit_probs
 from ...config import Config, config as default_config
 from .prc import LDPCPRC0, LDPCPRC0Params
+from .wm_logger import logger
 
 
 def _seed_to_uint64(seed: bytes) -> int:
@@ -86,33 +87,36 @@ class PRCWatermark:
     ) -> None:
         self.cfg = cfg or default_config
         self.lambda_entropy = lambda_entropy
-
         self.key = key if key is not None else os.urandom(32)
 
         if prc_params is None:
-            # Practical defaults with *low false positives*.
+            # Practical text defaults for the paper's LDPC-PRC0 construction.
             #
-            # The PRC detector checks whether a length-n block "looks like" an
-            # LDPC-PRC0 encoding by testing whether its syndrome has unusually
-            # low weight. If r is small, this event is not rare for uniform
-            # random strings, and scanning multiple blocks can lead to many
-            # false positives on baseline text.
-            #
-            # Using a larger r (≈ n) and a constant zeta keeps the decode
-            # acceptance probability for random strings exponentially small,
-            # which is the intended regime in Section 5/7 of the paper.
+            # This binary-token adaptation is a high-noise channel from PRC
+            # bits to observed text bits, so short generations need sparse
+            # parity checks for robustness.
             prc_params = LDPCPRC0Params(
-                n=256,
-                g=64,
-                t=6,
-                r=253,     # ≈ 0.99n
-                eta=0.02,
-                zeta=0.25, # threshold = (1/2 - zeta) r = 0.25 r
+                n=2048,
+                g=128,
+                t=1,
+                r=2028,
+                eta=0.005,
+                zeta=0.045,
             )
 
         self.prc_params = prc_params
         self._prc = LDPCPRC0(self.prc_params, seed=_seed_to_uint64(self.key))
         self._sk, self._pk = self._prc.keygen()
+        logger.info(
+            "PRC setup | n=%s g=%s t=%s r=%s eta=%.4f zeta=%.4f key=%s",
+            self.prc_params.n,
+            self.prc_params.g,
+            self.prc_params.t,
+            self.prc_params.r,
+            self.prc_params.eta,
+            self.prc_params.zeta,
+            self.key.hex(),
+        )
 
     def _mask(self, block_idx_1based: int) -> int:
         return _mask_from_seed(self.key, block_idx_1based=block_idx_1based, n_bits=self.prc_params.n)
@@ -149,6 +153,8 @@ class PRCWatermark:
         generated_ids: List[int] = []
         bitstring: str = ""
         bit_surprisals: List[float] = []
+        target_bit_matches = 0
+        target_bits_total = 0
 
         n = int(self.prc_params.n)
         block_idx = 1
@@ -196,6 +202,9 @@ class PRCWatermark:
                 xj = (x_block >> j_in_block) & 1
                 q = _bernoulli_param(prob_1, int(xj))
                 chosen = 1 if torch.rand(1).item() <= q else 0
+                if chosen == int(xj):
+                    target_bit_matches += 1
+                target_bits_total += 1
 
                 chosen_prob = prob_1 if chosen == 1 else (1.0 - prob_1)
                 chosen_prob = max(chosen_prob, 1e-12)
@@ -221,6 +230,19 @@ class PRCWatermark:
             skip_special_tokens=False,
             clean_up_tokenization_spaces=False,
         )
+        full_blocks = len(bitstring) // n
+        target_match_rate = (
+            target_bit_matches / target_bits_total if target_bits_total > 0 else 0.0
+        )
+        logger.info(
+            "PRC generated | tokens=%s bits=%s full_blocks=%s target_match_rate=%.4f time=%.2fs prompt=%r",
+            len(generated_ids),
+            len(bitstring),
+            full_blocks,
+            target_match_rate,
+            generation_time,
+            prompt[:80],
+        )
 
         return {
             "prompt": prompt,
@@ -232,6 +254,8 @@ class PRCWatermark:
             "bit_length": bit_length,
             "bit_surprisals": bit_surprisals,
             "total_empirical_entropy": sum(bit_surprisals),
+            "prc_target_match_rate": target_match_rate,
+            "prc_full_blocks": full_blocks,
             "mode": self.NAME,
             "key_hex": self.key.hex(),  # seed for deterministic Setup()
             "prc_params": {

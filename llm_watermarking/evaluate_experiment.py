@@ -17,7 +17,86 @@ from llm_watermarking.visualization import (
 )
 
 
-def evaluate_single_lambda(base_detects, wm_detects, lam):
+def _run_label_from_path(path):
+    name = os.path.splitext(os.path.basename(path))[0]
+    return name.replace("_results", "", 1)
+
+
+def _infer_run_metadata(wm_results, watermarked_path):
+    first = wm_results[0] if wm_results else {}
+    prc_p = first.get("prc_params")
+    run_label = _run_label_from_path(watermarked_path)
+
+    if isinstance(prc_p, dict):
+        return {
+            "scheme": "PRC",
+            "run_label": run_label,
+            "parameter": (
+                f"n={int(prc_p['n'])};g={int(prc_p['g'])};t={int(prc_p['t'])};"
+                f"r={int(prc_p['r'])};eta={float(prc_p['eta'])};zeta={float(prc_p['zeta'])}"
+            ),
+            "plot_label": run_label,
+        }
+
+    lam = first.get("lambda_entropy", 5.0)
+    return {
+        "scheme": "Undetectable",
+        "run_label": run_label,
+        "parameter": f"lambda={lam}",
+        "plot_label": run_label,
+    }
+
+
+def _write_or_append_csv(df, out_path):
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    if not os.path.exists(out_path):
+        df.to_csv(out_path, index=False)
+        return
+
+    existing_df = pd.read_csv(out_path)
+    if "Lambda" in existing_df.columns and "Parameter" in df.columns:
+        if "Parameter" not in existing_df.columns:
+            existing_df = existing_df.rename(columns={"Lambda": "Parameter"})
+        else:
+            existing_df["Parameter"] = existing_df["Parameter"].fillna(existing_df["Lambda"])
+            existing_df = existing_df.drop(columns=["Lambda"])
+
+    for col in df.columns:
+        if col not in existing_df.columns:
+            existing_df[col] = ""
+    for col in existing_df.columns:
+        if col not in df.columns:
+            df[col] = ""
+
+    ordered_cols = list(df.columns) + [col for col in existing_df.columns if col not in df.columns]
+    existing_df = existing_df[ordered_cols]
+    df = df[ordered_cols]
+    pd.concat([existing_df, df], ignore_index=True).to_csv(out_path, index=False)
+
+
+def _write_preserving_existing_columns(df, out_path):
+    if not os.path.exists(out_path):
+        df.to_csv(out_path, index=False)
+        return
+
+    existing_df = pd.read_csv(out_path)
+    if len(existing_df) != len(df):
+        df.to_csv(out_path, index=False)
+        return
+
+    df = df.reset_index(drop=True)
+    existing_df = existing_df.reset_index(drop=True)
+    for col in existing_df.columns:
+        if col not in df.columns:
+            df[col] = existing_df[col]
+
+    preferred = list(df.columns)
+    preserved = [col for col in existing_df.columns if col in df.columns and col not in preferred]
+    df[preferred + preserved].to_csv(out_path, index=False)
+
+
+def evaluate_single_lambda(base_detects, wm_detects, metadata):
     tp = sum(wm_detects)
     fn = len(wm_detects) - tp
     
@@ -35,7 +114,9 @@ def evaluate_single_lambda(base_detects, wm_detects, lam):
     acc = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0.0
 
     row = {
-        "Lambda": lam,
+        "Scheme": metadata["scheme"],
+        "RunLabel": metadata["run_label"],
+        "Parameter": metadata["parameter"],
         "TPR": round(tpr, 4),
         "FNR": round(fnr, 4),
         "TNR": round(tnr, 4),
@@ -47,23 +128,14 @@ def evaluate_single_lambda(base_detects, wm_detects, lam):
     }
 
     df = pd.DataFrame([row])
-    os.makedirs("outputs", exist_ok=True)
     out_path = "outputs/table1_detectability.csv"
-    
-    if os.path.exists(out_path):
-        existing_df = pd.read_csv(out_path)
-        if "Lambda" not in existing_df.columns:
-            df.to_csv(out_path, index=False)
-        else:
-            df.to_csv(out_path, mode='a', header=False, index=False)
-    else:
-        df.to_csv(out_path, index=False)
+    _write_or_append_csv(df, out_path)
         
-    print(f"Detectability for Lambda={lam} appended to -> {out_path}")
+    print(f"Detectability for {metadata['run_label']} appended to -> {out_path}")
     print(df.to_string(index=False))
 
 
-def generate_table_2_csv(base_results, wm_results, out_path="outputs/table2_quality_metrics.csv"):
+def generate_table_2_csv(base_results, wm_results, metadata, out_path="outputs/table2_quality_metrics.csv"):
     rows = []
     
     base_ppls = []
@@ -90,6 +162,9 @@ def generate_table_2_csv(base_results, wm_results, out_path="outputs/table2_qual
         if isinstance(w_div, float): wm_divs.append(w_div)
         
         rows.append({
+            "Scheme": metadata["scheme"],
+            "RunLabel": metadata["run_label"],
+            "Parameter": metadata["parameter"],
             "Prompt": prompt,
             "No Watermarked Response": nw_text,
             "Watermarked Response": w_text,
@@ -109,6 +184,9 @@ def generate_table_2_csv(base_results, wm_results, out_path="outputs/table2_qual
     delta_div = w_div_m - b_div_m
 
     rows.append({
+        "Scheme": metadata["scheme"],
+        "RunLabel": metadata["run_label"],
+        "Parameter": metadata["parameter"],
         "Prompt": "--- DELTAS ---",
         "No Watermarked Response": "",
         "Watermarked Response": "",
@@ -144,6 +222,7 @@ def main():
     key_hex = wm_results[0].get("key_hex")
     lam = wm_results[0].get("lambda_entropy", 5.0)
     prc_p = wm_results[0].get("prc_params")
+    metadata = _infer_run_metadata(wm_results, args.watermarked)
 
     if not key_hex:
         print("Could not find key_hex in watermarked results. Aborting.")
@@ -212,26 +291,25 @@ def main():
 
     csv_base_path = args.baseline.replace('.jsonl', '.csv')
     df_base = format_df(base_results, is_wm=False)
-    df_base.to_csv(csv_base_path, index=False)
+    _write_preserving_existing_columns(df_base, csv_base_path)
     print(f"Updated {csv_base_path} with pristine detection columns!")
 
     print("\n" + "="*80)
-    evaluate_single_lambda(base_detects, wm_detects, lam)
+    evaluate_single_lambda(base_detects, wm_detects, metadata)
     
-    # Generate a lambda-specific name for Table 2
-    table2_path = f"outputs/table2_quality_metrics_lam{lam}.csv"
-    generate_table_2_csv(base_results, wm_results, out_path=table2_path)
+    table2_path = f"outputs/table2_quality_{metadata['run_label']}.csv"
+    generate_table_2_csv(base_results, wm_results, metadata, out_path=table2_path)
 
-    # Per-lambda plots (only for the current run's lambda).
+    # Per-run plots.
     plot_entropy_vs_detection_from_csvs(
         [csv_wm_path],
         output_dir="outputs",
-        filename=f"entropy_vs_detection_lam{lam}.png",
+        filename=f"entropy_vs_detection_{metadata['plot_label']}.png",
     )
     plot_total_entropy_vs_detection(
         [csv_wm_path],
         output_dir="outputs",
-        filename=f"total_entropy_vs_detection_lam{lam}.png",
+        filename=f"total_entropy_vs_detection_{metadata['plot_label']}.png",
     )
     print("="*80 + "\n")
 

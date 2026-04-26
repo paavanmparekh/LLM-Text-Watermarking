@@ -14,13 +14,13 @@ param(
     [ValidateSet("Undetectable", "PRC")]
     [string[]]$Schemes = @("Undetectable", "PRC"),
 
-    [double[]]$Lambdas = @(5.0, 7.0),  # Only used for Undetectable
+    [double[]]$Lambdas = @(5.0),  # Only used for Undetectable
 
     [ValidateSet("c4")]
     [string]$Dataset = "c4",
 
     [int]$MaxTokens = 150,
-    [int]$NumSamples = 5,
+    [int]$NumSamples = 10,
     [string]$OutputDir = "outputs",
 
     [switch]$RunRobustness
@@ -98,4 +98,4 @@ foreach ($scheme in $Schemes) {
 
 Write-Host "`n--- Pipeline Execution Complete! ---" -ForegroundColor Green
 Write-Host "Check 'outputs/table1_detectability.csv' for the combined results."
-Write-Host "Check 'outputs/table2_quality_metrics_*.csv' for individual quality stats."
+Write-Host "Check 'outputs/table2_quality_*.csv' for individual quality stats."

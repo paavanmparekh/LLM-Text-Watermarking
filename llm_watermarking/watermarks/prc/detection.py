@@ -3,7 +3,8 @@ import math
 from typing import Any, Dict, List, Optional
 
 from ...binarizer import build_binary_vocab
-from .prc import LDPCPRC0, LDPCPRC0Params
+from .prc import LDPCPRC0, LDPCPRC0Params, _syndrome_weight
+from .wm_logger import logger
 
 
 def _seed_to_uint64(seed: bytes) -> int:
@@ -70,6 +71,17 @@ class PRCWatermarkDetector:
 
         self._prc = LDPCPRC0(self.prc_params, seed=_seed_to_uint64(self.key))
         self._sk, _pk = self._prc.keygen()
+        logger.info(
+            "PRC detector setup | n=%s g=%s t=%s r=%s eta=%.4f zeta=%.4f robust_scan=%s key=%s",
+            self.prc_params.n,
+            self.prc_params.g,
+            self.prc_params.t,
+            self.prc_params.r,
+            self.prc_params.eta,
+            self.prc_params.zeta,
+            self.robust_scan,
+            self.key.hex(),
+        )
 
     def _mask(self, block_idx_1based: int) -> int:
         return _mask_from_seed(self.key, block_idx_1based=block_idx_1based, n_bits=self.prc_params.n)
@@ -117,48 +129,85 @@ class PRCWatermarkDetector:
 
         n = int(self.prc_params.n)
         L = len(bitstring)
+        threshold = (0.5 - float(self.prc_params.zeta)) * float(self.prc_params.r)
 
         if L < n:
-            return {
+            detection = {
                 "detected": False,
                 "detection_score": 0.0,
                 "num_bits": L,
                 "num_windows": 0,
                 "hit_start": -1,
                 "hit_block": -1,
+                "best_syndrome_weight": None,
+                "threshold": threshold,
             }
+            logger.info("PRC NOT detected | bits=%s < n=%s", L, n)
+            return detection
 
         # Default (fast) detector: check block-aligned length-n windows.
         # This matches how PRCWatermark embeds blocks sequentially from the start.
         if not self.robust_scan:
             num_full_blocks = L // n
+            best_weight = None
+            best_block = -1
             for block_idx in range(1, num_full_blocks + 1):
                 start = (block_idx - 1) * n
                 window_bits = bitstring[start : start + n]
                 window_int = _pack_bits_lsb_first(window_bits)
                 candidate = window_int ^ self._mask(block_idx)
+                syndrome_weight = _syndrome_weight(self._sk.P_rows, candidate ^ self._sk.z)
+                if best_weight is None or syndrome_weight < best_weight:
+                    best_weight = syndrome_weight
+                    best_block = block_idx
                 if self._prc.decode(self._sk, candidate) == 1:
-                    return {
+                    detection = {
                         "detected": True,
                         "detection_score": 1.0,
                         "num_bits": L,
                         "num_windows": num_full_blocks,
                         "hit_start": start,
                         "hit_block": block_idx,
+                        "best_syndrome_weight": syndrome_weight,
+                        "threshold": threshold,
                     }
-            return {
+                    logger.info(
+                        "PRC DETECTED | bits=%s windows=%s block=%s syndrome=%s threshold=%.2f",
+                        L,
+                        num_full_blocks,
+                        block_idx,
+                        syndrome_weight,
+                        threshold,
+                    )
+                    return detection
+            detection = {
                 "detected": False,
                 "detection_score": 0.0,
                 "num_bits": L,
                 "num_windows": num_full_blocks,
                 "hit_start": -1,
                 "hit_block": -1,
+                "best_syndrome_weight": best_weight,
+                "best_block": best_block,
+                "threshold": threshold,
             }
+            logger.info(
+                "PRC NOT detected | bits=%s windows=%s best_block=%s best_syndrome=%s threshold=%.2f",
+                L,
+                num_full_blocks,
+                best_block,
+                best_weight,
+                threshold,
+            )
+            return detection
 
         # Robust path: scan all length-n windows and all possible OTP blocks.
         max_blocks = max(1, math.ceil(L / n) + 1)
 
         windows_checked = 0
+        best_weight = None
+        best_start = -1
+        best_block = -1
         for start in range(0, L - n + 1):
             window_bits = bitstring[start : start + n]
             window_int = _pack_bits_lsb_first(window_bits)
@@ -166,24 +215,55 @@ class PRCWatermarkDetector:
 
             for block_idx in range(1, max_blocks + 1):
                 candidate = window_int ^ self._mask(block_idx)
+                syndrome_weight = _syndrome_weight(self._sk.P_rows, candidate ^ self._sk.z)
+                if best_weight is None or syndrome_weight < best_weight:
+                    best_weight = syndrome_weight
+                    best_start = start
+                    best_block = block_idx
                 if self._prc.decode(self._sk, candidate) == 1:
-                    return {
+                    detection = {
                         "detected": True,
                         "detection_score": 1.0,
                         "num_bits": L,
                         "num_windows": windows_checked,
                         "hit_start": start,
                         "hit_block": block_idx,
+                        "best_syndrome_weight": syndrome_weight,
+                        "threshold": threshold,
                     }
+                    logger.info(
+                        "PRC DETECTED | bits=%s windows=%s start=%s block=%s syndrome=%s threshold=%.2f",
+                        L,
+                        windows_checked,
+                        start,
+                        block_idx,
+                        syndrome_weight,
+                        threshold,
+                    )
+                    return detection
 
-        return {
+        detection = {
             "detected": False,
             "detection_score": 0.0,
             "num_bits": L,
             "num_windows": windows_checked,
             "hit_start": -1,
             "hit_block": -1,
+            "best_syndrome_weight": best_weight,
+            "best_start": best_start,
+            "best_block": best_block,
+            "threshold": threshold,
         }
+        logger.info(
+            "PRC NOT detected | bits=%s windows=%s best_start=%s best_block=%s best_syndrome=%s threshold=%.2f",
+            L,
+            windows_checked,
+            best_start,
+            best_block,
+            best_weight,
+            threshold,
+        )
+        return detection
 
     def detect_batch(
         self,
