@@ -3,7 +3,7 @@ param(
     [string]$Dataset = "c4",
 
     [int]$MaxTokens = 150,
-    [int]$NumSamples = 10,
+    [int]$NumSamples = 100,
     [string]$OutputDir = "outputs"
 )
 

@@ -20,8 +20,15 @@ param(
     [string]$Dataset = "c4",
 
     [int]$MaxTokens = 150,
-    [int]$NumSamples = 10,
+    [int]$NumSamples = 20,
     [string]$OutputDir = "outputs",
+
+    [int]$PrcN = 2048,
+    [int]$PrcG = 128,
+    [int]$PrcT = 1,
+    [int]$PrcR = 2028,
+    [double]$PrcEta = 0.005,
+    [double]$PrcZeta = 0.045,
 
     [switch]$RunRobustness
 )
@@ -65,12 +72,12 @@ foreach ($scheme in $Schemes) {
 
             if ($RunRobustness) {
                 Write-Host "`n--- [C] Running Robustness Evaluation ---" -ForegroundColor Cyan
-                python evaluate_robustness.py --results $wm_results --output $robust_out
+                python -m llm_watermarking.evaluate_robustness --results $wm_results --output $robust_out
             }
         }
     }
     elseif ($scheme -eq "PRC") {
-        $suffix = "_c4_s$NumSamples" + "_t$MaxTokens"
+        $suffix = "_c4_s$NumSamples" + "_t$MaxTokens" + "_n$PrcN"
         $wm_results = Join-Path $OutputDir "prc_results$suffix.jsonl"
         $robust_out = Join-Path $OutputDir "robustness_results_prc$suffix.csv"
 
@@ -80,7 +87,7 @@ foreach ($scheme in $Schemes) {
 
         # A. Generation
         Write-Host "--- [A] Generating Watermarked Text ($scheme$suffix) ---" -ForegroundColor Cyan
-        python -m llm_watermarking.main --watermark $scheme --dataset $Dataset --max-tokens $MaxTokens --num-samples $NumSamples --suffix $suffix --output-dir $OutputDir --no-plots
+        python -m llm_watermarking.main --watermark $scheme --dataset $Dataset --max-tokens $MaxTokens --num-samples $NumSamples --suffix $suffix --output-dir $OutputDir --no-plots --prc-n $PrcN --prc-g $PrcG --prc-t $PrcT --prc-r $PrcR --prc-eta $PrcEta --prc-zeta $PrcZeta
 
         # B. Detection and Quality Evaluation
         Write-Host "`n--- [B] Running Detection and Quality Evaluation ---" -ForegroundColor Cyan
@@ -88,7 +95,7 @@ foreach ($scheme in $Schemes) {
 
         if ($RunRobustness) {
             Write-Host "`n--- [C] Running Robustness Evaluation ---" -ForegroundColor Cyan
-            python evaluate_robustness.py --results $wm_results --output $robust_out
+            python -m llm_watermarking.evaluate_robustness --results $wm_results --output $robust_out
         }
     }
     else {

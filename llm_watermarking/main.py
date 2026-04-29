@@ -16,6 +16,7 @@ HF_TOKEN : str, optional
 """
 
 import argparse
+import sys
 
 from .config import Config
 from .model_loader import load_model_and_tokenizer
@@ -113,10 +114,20 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional suffix for the results filename (e.g. '_lam5.0').",
     )
+    parser.add_argument("--prc-n", type=int, default=None, help="PRC block length in bits.")
+    parser.add_argument("--prc-g", type=int, default=None, help="PRC generator matrix columns.")
+    parser.add_argument("--prc-t", type=int, default=None, help="PRC parity-check row weight.")
+    parser.add_argument("--prc-r", type=int, default=None, help="PRC number of parity checks.")
+    parser.add_argument("--prc-eta", type=float, default=None, help="PRC encode noise rate.")
+    parser.add_argument("--prc-zeta", type=float, default=None, help="PRC decoding threshold slack.")
     return parser.parse_args()
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     args = parse_args()
 
     cfg = Config(
@@ -199,11 +210,39 @@ def main() -> None:
     if args.watermark:
         scheme_cls = WATERMARK_REGISTRY[args.watermark]
         key_bytes = bytes.fromhex(cfg.watermark_key) if cfg.watermark_key else None
-        watermark_scheme = scheme_cls(
-            cfg, 
-            key=key_bytes, 
-            lambda_entropy=cfg.lambda_entropy
-        )
+        if args.watermark == "PRC" and args.prc_n is not None:
+            missing = [
+                name for name, value in {
+                    "--prc-g": args.prc_g,
+                    "--prc-t": args.prc_t,
+                    "--prc-r": args.prc_r,
+                    "--prc-eta": args.prc_eta,
+                    "--prc-zeta": args.prc_zeta,
+                }.items()
+                if value is None
+            ]
+            if missing:
+                raise ValueError(f"Missing PRC parameter(s): {', '.join(missing)}")
+            prc_params = LDPCPRC0Params(
+                n=args.prc_n,
+                g=args.prc_g,
+                t=args.prc_t,
+                r=args.prc_r,
+                eta=args.prc_eta,
+                zeta=args.prc_zeta,
+            )
+            watermark_scheme = scheme_cls(
+                cfg,
+                key=key_bytes,
+                lambda_entropy=cfg.lambda_entropy,
+                prc_params=prc_params,
+            )
+        else:
+            watermark_scheme = scheme_cls(
+                cfg,
+                key=key_bytes,
+                lambda_entropy=cfg.lambda_entropy,
+            )
         print(f"Watermarking scheme: {args.watermark} -> {watermark_scheme.NAME} (lambda={watermark_scheme.lambda_entropy})")
         print(f"Using Secret Key: {watermark_scheme.key.hex()}")
     else:

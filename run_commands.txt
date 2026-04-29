@@ -43,8 +43,8 @@ python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_resul
 python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/prc_results_c4_s5_t150.jsonl
 
 # Robustness Evaluation (works for Undetectable or PRC results)
-python evaluate_robustness.py --results outputs/undetectable_results.jsonl --output outputs/robustness_results_undetectable.csv
-python evaluate_robustness.py --results outputs/prc_results.jsonl --output outputs/robustness_results_prc.csv
+python -m llm_watermarking.evaluate_robustness --results outputs/undetectable_results.jsonl --output outputs/robustness_results_undetectable.csv
+python -m llm_watermarking.evaluate_robustness --results outputs/prc_results.jsonl --output outputs/robustness_results_prc.csv
 
 # Baseline-only runner script
 powershell -ExecutionPolicy Bypass -File run_baseline.ps1
