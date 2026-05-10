@@ -13,7 +13,6 @@ The experiments use `microsoft/phi-2`, C4 validation prompts, and evaluate detec
 - `llm_watermarking/watermarks/undetectable/`: Undetectable watermark generator and detector.
 - `llm_watermarking/watermarks/prc/`: PRC generator, detector, and PRC primitive.
 - `outputs/`: selected final experiment outputs used in the report.
-- `project report/`: final LaTeX report and report figures.
 - `run_baseline.ps1`: baseline generation runner.
 - `run_pipeline.ps1`: watermark experiment runner.
 - `run_commands.txt`: exact commands for reproducing the final experiments.
@@ -54,5 +53,4 @@ Additional PRC settings used in the report and all evaluation commands are liste
 - `outputs/table2_quality_*.csv`: quality metrics.
 - `outputs/table3_robustness_prc_c4_s100_t150.csv`: PRC robustness results.
 - `outputs/robustness_results_undetectable_lam5.0.csv`: Undetectable robustness results.
-- `outputs/*png`: selected figures used in the report.
 
