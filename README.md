@@ -56,6 +56,3 @@ Additional PRC settings used in the report and all evaluation commands are liste
 - `outputs/robustness_results_undetectable_lam5.0.csv`: Undetectable robustness results.
 - `outputs/*png`: selected figures used in the report.
 
-## Report
-
-The final report is `project report/report.tex`. It summarizes the implemented schemes, experiment setup, detectability and quality results, entropy plots, robustness results, and learning outcomes.
