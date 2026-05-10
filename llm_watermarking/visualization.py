@@ -227,6 +227,79 @@ def plot_total_entropy_vs_detection(
         plt.show()
 
 
+def plot_generation_time_comparison_from_csvs(
+    baseline_csv: str = "outputs/baseline_results.csv",
+    prc_csv: str = "outputs/prc_results_c4_s100_t150.csv",
+    undetectable_csv: str = "outputs/undetectable_results_lam5.0.csv",
+    output_dir: Optional[str] = None,
+    filename: str = "generation_time_comparison.png",
+    max_prompts: int = 10,
+) -> None:
+    """Grouped bar chart comparing generation time for baseline, PRC, and Undetectable."""
+    sns.set_theme(style="whitegrid")
+
+    runs = [
+        ("Baseline", baseline_csv),
+        ("PRC", prc_csv),
+        ("Undetectable (lambda=5)", undetectable_csv),
+    ]
+
+    data = []
+    for label, csv_path in runs:
+        if not os.path.exists(csv_path):
+            print(f"Skipping {label}: {csv_path} not found.")
+            continue
+
+        df = pd.read_csv(csv_path)
+        time_col = "generation_time" if "generation_time" in df.columns else (
+            "Gen Time (s)" if "Gen Time (s)" in df.columns else None
+        )
+        if time_col is None:
+            print(f"Skipping {label}: Missing generation time column.")
+            continue
+
+        prompt_col = "Prompt #" if "Prompt #" in df.columns else None
+        df = df.head(max_prompts).reset_index(drop=True)
+        for idx, row in df.iterrows():
+            gen_time = pd.to_numeric(row.get(time_col), errors="coerce")
+            if pd.isna(gen_time):
+                continue
+            prompt_num = row.get(prompt_col) if prompt_col else idx + 1
+            data.append({
+                "Prompt": int(prompt_num),
+                "Generation Time (s)": float(gen_time),
+                "Run": label,
+            })
+
+    if not data:
+        print("No data available for Generation Time comparison plot.")
+        return
+
+    df_plot = pd.DataFrame(data)
+    fig, ax = plt.subplots(figsize=(11, 6))
+
+    sns.barplot(
+        data=df_plot,
+        x="Prompt",
+        y="Generation Time (s)",
+        hue="Run",
+        ax=ax,
+        palette={
+            "Baseline": "#4C78A8",
+            "PRC": "#F58518",
+            "Undetectable (lambda=5)": "#54A24B",
+        },
+    )
+
+    ax.set_title("Generation Time by Prompt", fontsize=13, fontweight="bold")
+    ax.set_xlabel("Prompt #")
+    ax.set_ylabel("Generation Time (seconds)")
+    ax.legend(title="Generation Mode")
+
+    plt.tight_layout()
+    _save_or_show(fig, filename, output_dir)
+
+
 
 def plot_evaluation_metrics(
     results: List[dict],
@@ -252,20 +325,26 @@ def generate_final_plots_from_outputs(output_dir: str = "outputs") -> None:
     csv_paths = discover_watermarked_csvs(output_dir=output_dir)
     if not csv_paths:
         print(f"No watermarked CSVs found in {output_dir}.")
-        return
+    else:
+        for csv_path in csv_paths:
+            lam = str(csv_path).split("lam")[-1].split(".csv")[0]
+            plot_entropy_vs_detection_from_csvs(
+                [csv_path],
+                output_dir=output_dir,
+                filename=f"entropy_vs_detection_lam{lam}.png",
+            )
+            plot_total_entropy_vs_detection(
+                [csv_path],
+                output_dir=output_dir,
+                filename=f"total_entropy_vs_detection_lam{lam}.png",
+            )
 
-    for csv_path in csv_paths:
-        lam = str(csv_path).split("lam")[-1].split(".csv")[0]
-        plot_entropy_vs_detection_from_csvs(
-            [csv_path],
-            output_dir=output_dir,
-            filename=f"entropy_vs_detection_lam{lam}.png",
-        )
-        plot_total_entropy_vs_detection(
-            [csv_path],
-            output_dir=output_dir,
-            filename=f"total_entropy_vs_detection_lam{lam}.png",
-        )
+    plot_generation_time_comparison_from_csvs(
+        baseline_csv=os.path.join(output_dir, "baseline_results.csv"),
+        prc_csv=os.path.join(output_dir, "prc_results_c4_s100_t150.csv"),
+        undetectable_csv=os.path.join(output_dir, "undetectable_results_lam5.0.csv"),
+        output_dir=output_dir,
+    )
 
 
 def main() -> None:
@@ -274,7 +353,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate final watermarking plots from outputs/*.csv")
     parser.add_argument("--output-dir", default="outputs", help="Directory containing result CSVs.")
     parser.add_argument("--combined", action="store_true", help="Also write combined plots across all lambdas.")
+    parser.add_argument("--timing-only", action="store_true", help="Only write the generation-time comparison plot.")
     args = parser.parse_args()
+
+    if args.timing_only:
+        plot_generation_time_comparison_from_csvs(
+            baseline_csv=os.path.join(args.output_dir, "baseline_results.csv"),
+            prc_csv=os.path.join(args.output_dir, "prc_results_c4_s100_t150.csv"),
+            undetectable_csv=os.path.join(args.output_dir, "undetectable_results_lam5.0.csv"),
+            output_dir=args.output_dir,
+        )
+        return
 
     generate_final_plots_from_outputs(output_dir=args.output_dir)
     if args.combined:

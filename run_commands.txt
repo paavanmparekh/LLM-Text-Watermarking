@@ -1,69 +1,31 @@
-# Defaults (from llm_watermarking/main.py):
-# - --max-tokens: 150
-# - --temperature: 1.0
-# - --num-samples: 500 (only used when --dataset is provided)
-# - prompts: built-in PromptLoader() prompts if neither --dataset nor --prompts is given
+# LLM Text Watermarking: run commands
 
-# Baseline Generation (No Watermarking)
-python -m llm_watermarking.main
+# 1. Install dependencies
+pip install -r llm_watermarking/requirements.txt
 
-# Baseline Evaluation with C4 Dataset
-python -m llm_watermarking.main --dataset c4 --max-tokens 150 --num-samples 10
+# 2. Generate baseline outputs used for comparison
+powershell -ExecutionPolicy Bypass -File run_baseline.ps1 -Dataset c4 -NumSamples 100 -MaxTokens 150 -OutputDir outputs
 
-# Undetectable Watermarking Generation
-# (This will automatically generate a random secret key and save results to outputs/undetectable_results.jsonl)
-python -m llm_watermarking.main --watermark Undetectable
+# 3. Generate final Undetectable watermark runs
+powershell -ExecutionPolicy Bypass -File run_pipeline.ps1 -Schemes Undetectable -Lambdas 2.0,4.0,5.0,6.0 -NumSamples 100 -MaxTokens 150 -OutputDir outputs
 
-# Undetectable Watermarking Generation (C4, explicit max tokens + num samples)
-python -m llm_watermarking.main --watermark Undetectable --dataset c4 --max-tokens 150 --num-samples 100 --no-plots
+# 4. Generate final PRC runs used in the report
+python -m llm_watermarking.main --watermark PRC --dataset c4 --max-tokens 150 --num-samples 100 --suffix _c4_s100_t150 --output-dir outputs --no-plots --prc-n 2048 --prc-g 128 --prc-t 1 --prc-r 2028 --prc-eta 0.005 --prc-zeta 0.045
+python -m llm_watermarking.main --watermark PRC --dataset c4 --max-tokens 150 --num-samples 5 --suffix _c4_s5_t150_n512 --output-dir outputs --no-plots --prc-n 512 --prc-g 32 --prc-t 1 --prc-r 500 --prc-eta 0.005 --prc-zeta 0.045
+python -m llm_watermarking.main --watermark PRC --dataset c4 --max-tokens 300 --num-samples 100 --suffix _c4_s100_t300_n2048 --output-dir outputs --no-plots --prc-n 2048 --prc-g 128 --prc-t 1 --prc-r 2028 --prc-eta 0.005 --prc-zeta 0.045
 
-# Undetectable Watermark Detection
-# (Replace <YOUR_SECRET_KEY> with the actual hex key outputted during the generation step)
-python -m llm_watermarking.main --watermark Undetectable --load-results outputs/undetectable_results.jsonl --detect-only --watermark-key <YOUR_SECRET_KEY>
+# 5. Evaluate detectability and quality
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/prc_results_c4_s100_t150.jsonl
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/prc_results_c4_s5_t150_n512.jsonl
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/prc_results_c4_s100_t300_n2048.jsonl
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/undetectable_results_lam2.0.jsonl
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/undetectable_results_lam4.0.jsonl
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/undetectable_results_lam5.0.jsonl
+python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/undetectable_results_lam6.0.jsonl
 
-# PRC Watermarking Generation
-# (This will automatically generate a random secret key and save results to outputs/prc_results.jsonl)
-python -m llm_watermarking.main --watermark PRC
+# 6. Evaluate robustness under random substitutions
+python -m llm_watermarking.evaluate_robustness --results outputs/prc_results_c4_s100_t150.jsonl --output outputs/table3_robustness_prc_c4_s100_t150.csv
+python -m llm_watermarking.evaluate_robustness --results outputs/undetectable_results_lam5.0.jsonl --output outputs/robustness_results_undetectable_lam5.0.csv
 
-# PRC Watermarking Generation (C4, explicit max tokens + num samples)
-python -m llm_watermarking.main --watermark PRC --dataset c4 --max-tokens 150 --num-samples 100 --no-plots
-
-# PRC Watermarking Generation (C4, 5 samples, 150 tokens) + explicit suffix
-python -m llm_watermarking.main --watermark PRC --dataset c4 --max-tokens 150 --num-samples 5 --suffix _c4_s5_t150 --output-dir outputs --no-plots
-
-# PRC Watermark Detection
-# (Replace <YOUR_SECRET_KEY> with the actual hex key outputted during the generation step)
-python -m llm_watermarking.main --watermark PRC --load-results outputs/prc_results.jsonl --detect-only --watermark-key <YOUR_SECRET_KEY>
-
-# Run Evaluation and Generate Quality Metrics (Requires Baseline and Watermarked runs)
-python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/undetectable_results.jsonl
-
-# Run Evaluation for PRC (Requires Baseline and PRC Watermarked runs)
-python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/prc_results.jsonl
-python -m llm_watermarking.evaluate_experiment --baseline outputs/baseline_results.jsonl --watermarked outputs/prc_results_c4_s5_t150.jsonl
-
-# Robustness Evaluation (works for Undetectable or PRC results)
-python -m llm_watermarking.evaluate_robustness --results outputs/undetectable_results.jsonl --output outputs/robustness_results_undetectable.csv
-python -m llm_watermarking.evaluate_robustness --results outputs/prc_results.jsonl --output outputs/robustness_results_prc.csv
-
-# Baseline-only runner script
-powershell -ExecutionPolicy Bypass -File run_baseline.ps1
-
-# Full pipeline script (runs only watermark experiments, using an existing baseline)
-powershell -ExecutionPolicy Bypass -File run_pipeline.ps1
-
-# Pipeline for only ONE scheme:
-powershell -ExecutionPolicy Bypass -File run_pipeline.ps1 -Schemes Undetectable -Lambdas 5.0,7.0
-powershell -ExecutionPolicy Bypass -File run_pipeline.ps1 -Schemes PRC
-
-# Pipeline using an existing baseline (same behavior, already requires baseline):
-powershell -ExecutionPolicy Bypass -File run_pipeline.ps1 -Schemes PRC -NumSamples 5 -MaxTokens 150
-powershell -ExecutionPolicy Bypass -File run_pipeline.ps1 -Schemes Undetectable -Lambdas 5.0 -NumSamples 5 -MaxTokens 150
-
-# Optional helpful arguments for main.py:
-# --temperature 1.0         (adjust sampling temperature, default 1.0)
-# --max-tokens 150          (set max tokens per generation, default 150)
-# --output-dir custom_dir   (change output directory, default outputs/)
-# --dataset c4              (use the c4 dataset for prompts instead of simple defaults)
-# --num-samples 10          (number of samples to pull from the dataset, default 500)
-# --lambda 5.0              (security parameter λ for Undetectable watermarking, default: 5.0)
+# 7. Rebuild plots from existing CSVs/results when needed
+python -m llm_watermarking.visualization

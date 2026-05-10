@@ -2,10 +2,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Output directories
-outputs/
-*.jsonl
-*.png
+# Runtime logs and caches
 logs/
 **/*.log
 

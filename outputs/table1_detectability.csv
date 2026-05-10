@@ -1,0 +1,14 @@
+Scheme,RunLabel,Parameter,TPR,FNR,TNR,FPR,Precision,Recall,F1,Accuracy
+PRC,prc_c4_s100_t150,n=2048;g=128;t=1;r=2028;eta=0.005;zeta=0.045,0.66,0.34,1.0,0.0,1.0,0.66,0.7952,0.83
+PRC,prc_c4_s100_t150_n512,n=512;g=1296;t=36;r=507;eta=0.125;zeta=0.210740501964935,0.0,1.0,1.0,0.0,0.0,0.0,0.0,0.5
+Undetectable,undetectable_lam5.0,lambda=5.0,0.78,0.22,0.98,0.02,0.975,0.78,0.8667,0.88
+SubstringComplete,substringcomplete_lam5.0,lambda=5.0,1.0,0.0,0.0,1.0,0.0909,1.0,0.1667,0.0909
+SubstringComplete,substringcomplete_lam5.0,lambda=5.0,0.8,0.2,1.0,0.0,1.0,0.8,0.8889,0.9818
+Undetectable,undetectable_lam2.0,lambda=2.0,1.0,0.0,0.0,1.0,0.5,1.0,0.6667,0.5
+Undetectable,undetectable_lam4.0,lambda=4.0,0.88,0.12,0.87,0.13,0.8713,0.88,0.8756,0.875
+Undetectable,undetectable_lam6.0,lambda=6.0,0.62,0.38,1.0,0.0,1.0,0.62,0.7654,0.81
+PRC,prc_c4_s5_t150_n2700,n=2700;g=42;t=4;r=2565;eta=0.005;zeta=0.141,0.0,1.0,1.0,0.0,0.0,0.0,0.0,0.9524
+PRC,prc_c4_s10_t150_n1000,n=1000;g=42;t=3;r=990;eta=0.005;zeta=0.178,0.0,1.0,1.0,0.0,0.0,0.0,0.0,0.9091
+PRC,prc_highentropy1_s1_t150_n1000,n=1000;g=42;t=3;r=990;eta=0.005;zeta=0.178,0.0,1.0,1.0,0.0,0.0,0.0,0.0,0.9901
+PRC,prc_c4_s5_t150_n512,n=512;g=32;t=1;r=500;eta=0.005;zeta=0.045,1.0,0.0,0.79,0.21,0.1923,1.0,0.3226,0.8
+PRC,prc_c4_s100_t300_n2048,n=2048;g=128;t=1;r=2028;eta=0.005;zeta=0.045,0.94,0.06,0.99,0.01,0.9895,0.94,0.9641,0.965
